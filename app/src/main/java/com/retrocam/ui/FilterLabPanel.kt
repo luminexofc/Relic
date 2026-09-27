@@ -153,9 +153,12 @@ fun FilterLabPanel(
                 LabSlider(k.label, v, k.min, k.max, accent, dim, { onKnob(i, it) }, neutral = k.neutral, onReset = { onResetKnob(i) })
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onResetAll) {
-                    Text("RESET ALL", fontFamily = AppType.Sans, fontSize = 11.sp, color = dim)
-                }
+                ShadcnButton(
+                    text = "Reset all",
+                    onClick = onResetAll,
+                    variant = ButtonVariant.Ghost,
+                    size = ButtonSize.Sm,
+                )
             }
             Spacer(Modifier.height(4.dp))
             Text("EFFECTS", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
@@ -246,9 +249,12 @@ fun FilterLabPanel(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onExtractPalette) {
-                    Text("EXTRACT", fontFamily = AppType.Sans, fontSize = 10.sp, color = accent)
-                }
+                ShadcnButton(
+                    text = "Extract",
+                    onClick = onExtractPalette,
+                    variant = ButtonVariant.Outline,
+                    size = ButtonSize.Sm,
+                )
                 if (palette.isNotEmpty()) {
                     SwatchRow(palette, -1, accent, dim) { onApplyPaletteColour(it, true) }
                 }
@@ -347,15 +353,48 @@ fun FilterLabPanel(
                             else MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.weight(1f),
                         )
-                        IconButton(onClick = { onEdit(r.id) }) {
-                            Icon(Icons.Filled.Edit, "Edit ${r.name}", tint = dim, modifier = Modifier.size(17.dp))
-                        }
-                        IconButton(onClick = { onShare(r.id) }) {
-                            Icon(Icons.Filled.QrCode, "Share ${r.name} as QR", tint = accent, modifier = Modifier.size(17.dp))
-                        }
-                        IconButton(onClick = { onDelete(r.id) }) {
-                            Icon(Icons.Filled.Delete, "Delete ${r.name}", tint = dim, modifier = Modifier.size(17.dp))
-                        }
+                        ShadcnButton(
+                            onClick = { onEdit(r.id) },
+                            variant = ButtonVariant.Ghost,
+                            size = ButtonSize.Icon,
+                            modifier = Modifier.size(30.dp),
+                            leading = {
+                                Icon(
+                                    Icons.Filled.Edit,
+                                    "Edit ${r.name}",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
+                        ShadcnButton(
+                            onClick = { onShare(r.id) },
+                            variant = ButtonVariant.Ghost,
+                            size = ButtonSize.Icon,
+                            modifier = Modifier.size(30.dp),
+                            leading = {
+                                Icon(
+                                    Icons.Filled.QrCode,
+                                    "Share ${r.name} as QR",
+                                    tint = ShadcnColor.Primary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
+                        ShadcnButton(
+                            onClick = { onDelete(r.id) },
+                            variant = ButtonVariant.Ghost,
+                            size = ButtonSize.Icon,
+                            modifier = Modifier.size(30.dp),
+                            leading = {
+                                Icon(
+                                    Icons.Filled.Delete,
+                                    "Delete ${r.name}",
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
                     }
                 }
             }

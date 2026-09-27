@@ -1,6 +1,7 @@
 package com.retrocam.ui
 
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
@@ -99,11 +100,11 @@ fun FilterStrip(
                     modifier = Modifier
                         .size(64.dp)
                         .scale(thumbScale)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(ShadcnRadius.Xl))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .then(
                             if (selected) Modifier.border(
-                                2.dp, Color.White, RoundedCornerShape(12.dp),
+                                2.dp, Color.White, RoundedCornerShape(ShadcnRadius.Xl),
                             ) else Modifier,
                         ),
                     contentAlignment = Alignment.Center,
@@ -114,7 +115,7 @@ fun FilterStrip(
                             contentDescription = spec.displayName,
                             modifier = Modifier
                                 .size(64.dp)
-                                .clip(RoundedCornerShape(12.dp)),
+                                .clip(RoundedCornerShape(ShadcnRadius.Xl)),
                         )
                     }
                 }

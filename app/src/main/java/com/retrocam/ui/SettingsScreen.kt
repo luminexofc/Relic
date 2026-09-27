@@ -1,6 +1,11 @@
 package com.retrocam.ui
 
+import com.retrocam.ui.components.ShadcnSwitch
+import com.retrocam.ui.components.ButtonSize
+import com.retrocam.ui.components.ButtonVariant
+import com.retrocam.ui.components.ShadcnButton
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -80,9 +85,18 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
             .padding(horizontal = 16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { viewModel.setSettingsOpen(false) }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
-            }
+            ShadcnButton(
+                onClick = { viewModel.setSettingsOpen(false) },
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        "Back",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                },
+            )
             Icon(
                 Icons.Filled.PhotoCamera,
                 contentDescription = null,
@@ -143,7 +157,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
                 }
-                Switch(checked = state.photoCard, onCheckedChange = viewModel::setPhotoCard)
+                ShadcnSwitch(checked = state.photoCard, onCheckedChange = viewModel::setPhotoCard)
             }
         }
 
@@ -173,7 +187,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
                 }
-                Switch(checked = state.filterPreview, onCheckedChange = viewModel::setFilterPreview)
+                ShadcnSwitch(checked = state.filterPreview, onCheckedChange = viewModel::setFilterPreview)
             }
         }
 
@@ -310,7 +324,7 @@ private fun SettingsCard(modifier: Modifier = Modifier, content: @Composable () 
     Column(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(ShadcnRadius.Lg))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 16.dp, vertical = 6.dp),
     ) {

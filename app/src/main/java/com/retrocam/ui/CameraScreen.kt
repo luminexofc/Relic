@@ -3,6 +3,7 @@
 package com.retrocam.ui
 
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 
 import android.Manifest
 import android.content.Intent
@@ -429,7 +430,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                     .width(boxW)
                     .height(boxH)
                     .graphicsLayer { rotationY = flipRot.value }
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(ShadcnRadius.Lg))
                     .background(Color.Black)
                     .onSizeChanged {
                         viewPx = IntSize(it.width, it.height)
@@ -616,7 +617,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                             Box(
                                 Modifier
                                     .size(32.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(ShadcnRadius.Lg))
                                     .background(Color.White),
                             )
                         } else {
@@ -878,7 +879,7 @@ private fun ToolButton(
                         .align(Alignment.BottomEnd)
                         .background(
                             MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                            RoundedCornerShape(4.dp),
+                            RoundedCornerShape(ShadcnRadius.Sm),
                         )
                         .padding(horizontal = 3.dp),
                 )
@@ -1149,7 +1150,7 @@ private fun ModePill(label: String, active: Boolean, onClick: () -> Unit) {
             .border(
                 1.dp,
                 if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
-                RoundedCornerShape(16.dp),
+                RoundedCornerShape(ShadcnRadius.Lg),
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 6.dp),

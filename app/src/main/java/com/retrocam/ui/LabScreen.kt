@@ -49,7 +49,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.retrocam.renderer.FilterRenderer
+import com.retrocam.ui.components.ButtonSize
+import com.retrocam.ui.components.ButtonVariant
+import com.retrocam.ui.components.ShadcnButton
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 
 /**
  * The Filter Lab, as a screen of its own.
@@ -148,13 +152,18 @@ fun LabScreen(viewModel: CameraViewModel) {
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { viewModel.closeLab() }) {
-                Icon(
-                    Icons.Filled.ArrowBack,
-                    "Back to camera",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            ShadcnButton(
+                onClick = { viewModel.closeLab() },
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Icon(
+                        Icons.Filled.ArrowBack,
+                        "Back to camera",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                },
+            )
             Text(
                 "FILTER LAB",
                 fontFamily = AppType.Sans,
@@ -163,13 +172,18 @@ fun LabScreen(viewModel: CameraViewModel) {
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { viewModel.flipCamera() }) {
-                Icon(
-                    Icons.Filled.Autorenew,
-                    "Flip camera",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            ShadcnButton(
+                onClick = { viewModel.flipCamera() },
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Icon(
+                        Icons.Filled.Autorenew,
+                        "Flip camera",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                },
+            )
         }
 
         // ---- the Lab's own viewfinder ----
@@ -178,7 +192,7 @@ fun LabScreen(viewModel: CameraViewModel) {
                 .fillMaxWidth()
                 .height(230.dp)
                 .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(ShadcnRadius.Lg))
                 .background(Color.Black)
                 .onSizeChanged {
                     if (it.width > 0 && it.height > 0) {

@@ -156,6 +156,30 @@ fun ShadcnButton(
 }
 
 /**
+ * Icon-only shadcn button. [ButtonSize.Icon] with no label, which is the shape
+ * shadcn uses for a bare back/close affordance.
+ */
+@Composable
+fun ShadcnButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    variant: ButtonVariant = ButtonVariant.Ghost,
+    size: ButtonSize = ButtonSize.Icon,
+    enabled: Boolean = true,
+    leading: @Composable () -> Unit,
+) {
+    ShadcnButton(
+        text = "",
+        onClick = onClick,
+        modifier = modifier,
+        variant = variant,
+        size = size,
+        enabled = enabled,
+        leading = leading,
+    )
+}
+
+/**
  * shadcn `Input`: no fill, 1px border, small radius, and a ring on focus.
  * Built on BasicTextField rather than Material's TextField so there is no
  * floating label, no indicator line and no 56dp minimum height.

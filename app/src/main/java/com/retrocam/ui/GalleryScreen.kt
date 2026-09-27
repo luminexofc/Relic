@@ -42,7 +42,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.retrocam.ui.components.ButtonSize
+import com.retrocam.ui.components.ButtonVariant
+import com.retrocam.ui.components.ShadcnButton
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -65,13 +69,18 @@ fun GalleryScreen(saveDir: String, onBack: () -> Unit) {
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            ShadcnButton(
+                onClick = onBack,
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                    )
+                },
+            )
             Text(
                 "ALBUM",
                 fontFamily = AppType.Sans,
@@ -130,7 +139,7 @@ private fun GalleryCell(item: MediaItem, onClick: () -> Unit, onShare: () -> Uni
     Box(
         Modifier
             .aspectRatio(1f)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(ShadcnRadius.Lg))
             .background(MaterialTheme.colorScheme.surface)
             .clickable(onClick = onClick),
     ) {
@@ -153,18 +162,21 @@ private fun GalleryCell(item: MediaItem, onClick: () -> Unit, onShare: () -> Uni
                     .size(28.dp),
             )
         }
-        IconButton(
+        ShadcnButton(
             onClick = onShare,
+            variant = ButtonVariant.Secondary,
+            size = ButtonSize.Icon,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .size(28.dp),
-        ) {
-            Icon(
-                Icons.Filled.Share,
-                contentDescription = "Share",
-                tint = Color.White,
-                modifier = Modifier.size(16.dp),
-            )
-        }
+            leading = {
+                Icon(
+                    Icons.Filled.Share,
+                    contentDescription = "Share",
+                    tint = MaterialTheme.colorScheme.onSecondary,
+                    modifier = Modifier.size(16.dp),
+                )
+            },
+        )
     }
 }
