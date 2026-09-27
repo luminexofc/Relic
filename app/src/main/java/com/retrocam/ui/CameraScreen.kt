@@ -608,7 +608,10 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(bottom = 24.dp, top = 4.dp),
+                // The gallery thumbnail and the flip button sat hard against the
+                // screen edges, which made this row read as full-bleed chrome
+                // rather than controls.
+                .padding(horizontal = 24.dp, bottom = 24.dp, top = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1142,33 +1145,47 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.Center,
+            // Side margins so the control is a bar rather than a full-bleed band.
+            // It keeps the equal-weight split below, so this narrows the group
+            // without moving the centre.
+            .padding(horizontal = 40.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") }, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(16.dp))
-        Box(
-            Modifier
-                .height(20.dp)
-                .width(1.dp)
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
-        )
-        Spacer(Modifier.width(16.dp))
         ModePill("Video", active = mode == "video", onClick = { onMode("video") }, modifier = Modifier.weight(1f))
-        Spacer(Modifier.width(16.dp))
-        Box(
-            Modifier
-                .height(20.dp)
-                .width(1.dp)
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
-        )
-        Spacer(Modifier.width(16.dp))
+        ModeDivider()
+        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") }, modifier = Modifier.weight(1f))
+        ModeDivider()
         ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") }, modifier = Modifier.weight(1f))
     }
 }
 
+/**
+ * The separator between two modes.
+ *
+ * The inline version of this was a 1dp line at 20% alpha and 20dp tall, which
+ * on a near-black background was effectively invisible - it read as three
+ * floating words with no switch between them. It is now tall enough to span the
+ * pill and dim enough to stay a divider rather than a rule.
+ */
 @Composable
+private fun ModeDivider() {
+    // An explicit width plus a centred child, rather than padding on the line.
+    // Modifier order would put the line hard against the left padding instead of
+    // centring it, and a 1dp target is exactly the kind of thing worth being
+    // unambiguous about.
+    Box(
+        Modifier.width(22.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .height(28.dp)
+                .width(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)),
+        )
+    }
+}
+
 private fun ModePill(
     label: String,
     active: Boolean,
