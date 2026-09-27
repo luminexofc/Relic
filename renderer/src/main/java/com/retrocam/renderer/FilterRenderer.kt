@@ -83,6 +83,13 @@ class FilterRenderer(
         val uSaturation: Int,
         val uRanges: Int,
         val uLocal: Int,
+        val uSharpRadius: Int,
+        val uDetail: Int,
+        val uMasking: Int,
+        val uGrainSize: Int,
+        val uGrainRough: Int,
+        val uVigMid: Int,
+        val uVigFeather: Int,
         val uCurve: Int,
         val uCurveAmount: Int,
         val uGamma: Int,
@@ -717,6 +724,13 @@ class FilterRenderer(
                 uSaturation = GLES20.glGetUniformLocation(p, "u_saturation"),
                 uRanges = GLES20.glGetUniformLocation(p, "u_ranges"),
                 uLocal = GLES20.glGetUniformLocation(p, "u_local"),
+                uSharpRadius = GLES20.glGetUniformLocation(p, "u_sharpRadius"),
+                uDetail = GLES20.glGetUniformLocation(p, "u_detail"),
+                uMasking = GLES20.glGetUniformLocation(p, "u_masking"),
+                uGrainSize = GLES20.glGetUniformLocation(p, "u_grainSize"),
+                uGrainRough = GLES20.glGetUniformLocation(p, "u_grainRough"),
+                uVigMid = GLES20.glGetUniformLocation(p, "u_vigMid"),
+                uVigFeather = GLES20.glGetUniformLocation(p, "u_vigFeather"),
                 uCurve = GLES20.glGetUniformLocation(p, "u_curve"),
                 uCurveAmount = GLES20.glGetUniformLocation(p, "u_curveAmount"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
@@ -1065,6 +1079,13 @@ class FilterRenderer(
             GLES20.glUniform4f(prog.uRanges, r[0], r[1], r[2], r[3])
             val l = u.local
             GLES20.glUniform3f(prog.uLocal, l[0], l[1], l[2])
+            GLES20.glUniform1f(prog.uSharpRadius, u.sharpRadius)
+            GLES20.glUniform1f(prog.uDetail, u.detail)
+            GLES20.glUniform1f(prog.uMasking, u.masking)
+            GLES20.glUniform1f(prog.uGrainSize, u.grainSize)
+            GLES20.glUniform1f(prog.uGrainRough, u.grainRough)
+            GLES20.glUniform1f(prog.uVigMid, u.vigMid)
+            GLES20.glUniform1f(prog.uVigFeather, u.vigFeather)
             GLES20.glUniform1f(prog.uGamma, u.gamma)
         if (prog.uCurve != -1) {
             GLES20.glUniform1f(prog.uCurveAmount, u.curveAmount)

@@ -106,7 +106,14 @@ data class SavedRecipe(
             append(lab.blacks).append(',')
             append(RecipeCodec.q(lab.texture)).append(',')
             append(RecipeCodec.q(lab.clarity)).append(',')
-            append(lab.dehaze).append('|')
+            append(lab.dehaze).append(',')
+            append(RecipeCodec.q(lab.sharpRadius)).append(',')
+            append(RecipeCodec.q(lab.detail)).append(',')
+            append(RecipeCodec.q(lab.masking)).append(',')
+            append(RecipeCodec.q(lab.grainSize)).append(',')
+            append(RecipeCodec.q(lab.grainRough)).append(',')
+            append(RecipeCodec.q(lab.vigMidpoint)).append(',')
+            append(lab.vigFeather).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -148,10 +155,10 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 9
+    const val VERSION = 10
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 40
+    private const val FIELD_COUNT = 47
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -186,6 +193,9 @@ object RecipeCodec {
             lab.toneCurves,
             q(lab.highlights), q(lab.shadows), q(lab.whites), q(lab.blacks),
             q(lab.texture), q(lab.clarity), q(lab.dehaze),
+            q(lab.sharpRadius), q(lab.detail), q(lab.masking),
+            q(lab.grainSize), q(lab.grainRough),
+            q(lab.vigMidpoint), q(lab.vigFeather),
         ).joinToString(SEP)
     }
 
@@ -319,6 +329,13 @@ object RecipeCodec {
                     texture = parts[37].toFloat(),
                     clarity = parts[38].toFloat(),
                     dehaze = parts[39].toFloat(),
+                    sharpRadius = parts[40].toFloat(),
+                    detail = parts[41].toFloat(),
+                    masking = parts[42].toFloat(),
+                    grainSize = parts[43].toFloat(),
+                    grainRough = parts[44].toFloat(),
+                    vigMidpoint = parts[45].toFloat(),
+                    vigFeather = parts[46].toFloat(),
                 ),
             )
             SavedRecipe(

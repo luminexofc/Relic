@@ -55,8 +55,22 @@ object Shaders {
 
         // Filter Lab effect stages. All zero means off, so the branches are free.
         uniform float u_vignette;
+        /** Adobe PostCropVignetteMidpoint, where the falloff starts. 0..1 */
+        uniform float u_vigMid;
+        /** Adobe PostCropVignetteFeather, how soft the falloff is. 0..1 */
+        uniform float u_vigFeather;
         uniform float u_grain;
         uniform float u_sharpen;
+        /** Adobe SharpnessRadius, as a multiple of a texel. 0.5 .. 3.0 */
+        uniform float u_sharpRadius;
+        /** Adobe Detail, a second finer unsharp, 0..1. */
+        uniform float u_detail;
+        /** Adobe Masking, a threshold on the local difference, 0..1. */
+        uniform float u_masking;
+        /** Adobe GrainSize, the noise cell scale. */
+        uniform float u_grainSize;
+        /** Adobe GrainRoughness, 0 smooth .. 1 blocky. */
+        uniform float u_grainRough;
         uniform float u_blur;
         uniform float u_glitch;
         uniform float u_duotone;
@@ -1142,17 +1156,40 @@ object Shaders {
                 c = mix(c, c * (tint * 2.0), u_splitAmount);
             }
 
-            // --- Sharpness. Adobe applies it after the tone curve and Look,
-            // not before, so a preset's curve shapes the tones and then the
-            // edges are found on the shaped result. --- [0,-1,0 / -1,5,-1 / 0,-1,0], mixed by amount ---
-            if (u_sharpen > 0.0) {
-                vec3 sum = vec3(0.0);
-                sum += sampleSrc(uv + vec2(-texel.x, 0.0)).rgb * -1.0;
-                sum += sampleSrc(uv + vec2( texel.x, 0.0)).rgb * -1.0;
-                sum += sampleSrc(uv + vec2(0.0, -texel.y)).rgb * -1.0;
-                sum += sampleSrc(uv + vec2(0.0,  texel.y)).rgb * -1.0;
-                sum += c * 5.0;
-                c = mix(c, clamp(sum, 0.0, 1.0), u_sharpen);
+            // --- Sharpness. Adobe applies it after the tone curve and Look, so
+            // a preset's curve shapes the tones and the edges are found on the
+            // shaped result.
+            //
+            // Masking is the part that matters and is not in the old 3x3: a
+            // threshold on the local difference, so flat areas are left alone and
+            // only real edges get sharpened. Without it a preset tuned to a
+            // threshold would ring every flat patch of sky.
+            if (u_sharpen > 0.0 || u_detail > 0.0) {
+                vec3 wide = tent3(c, texel * u_sharpRadius);
+                vec3 diff = c - wide;
+                if (u_masking > 0.0) {
+                    // Smoothstep on the magnitude of the difference. At masking 0
+                    // the mix leaves the difference untouched, so the default is
+                    // the old unthresholded behaviour.
+                    float m0 = u_masking * 0.3;
+                    vec3 w = vec3(smoothstep(m0, m0 + 0.1, abs(diff.r)),
+                                  smoothstep(m0, m0 + 0.1, abs(diff.g)),
+                                  smoothstep(m0, m0 + 0.1, abs(diff.b)));
+                    diff *= mix(vec3(1.0), w, u_masking);
+                }
+                c += diff * u_sharpen * 2.0;
+                if (u_detail > 0.0) {
+                    // Detail is a second, much finer unsharp. Reusing the old
+                    // 3x3 kernel costs no extra fetches, which is why Detail
+                    // rides on it instead of a third blur.
+                    vec3 s3 = vec3(0.0);
+                    s3 += sampleSrc(vFrameCoord + vec2(-texel.x, 0.0)).rgb * -1.0;
+                    s3 += sampleSrc(vFrameCoord + vec2( texel.x, 0.0)).rgb * -1.0;
+                    s3 += sampleSrc(vFrameCoord + vec2(0.0, -texel.y)).rgb * -1.0;
+                    s3 += sampleSrc(vFrameCoord + vec2(0.0,  texel.y)).rgb * -1.0;
+                    s3 += c * 5.0;
+                    c += (c - clamp(s3, 0.0, 1.0)) * u_detail;
+                }
             }
 
             // --- blur: 3x3 tent at widening spacing (see LabUniforms.BLUR_MAX_SPACING_PX) ---
@@ -1190,8 +1227,15 @@ object Shaders {
                 float aspect = u_resolution.x / max(u_resolution.y, 1.0);
                 vec2 d = uv - 0.5;
                 d.x *= aspect;
-                float nd = clamp(length(d) / length(vec2(0.5 * aspect, 0.5)), 0.0, 1.0);
-                c *= 1.0 - u_vignette * (nd * nd);
+                float nd = length(d) / length(vec2(0.5 * aspect, 0.5));
+                // Midpoint moves where the falloff starts and feather widens the
+                // transition, so a hard vignette and a soft one are reachable
+                // from the same falloff. Roundness and Aspect are not implemented;
+                // see the recipe field.
+                float start = mix(0.15, 0.95, u_vigMid);
+                float width = mix(0.02, 0.6, u_vigFeather);
+                float f = smoothstep(start, start + width, clamp(nd, 0.0, 1.2));
+                c *= 1.0 - u_vignette * f;
             }
 
             // --- grain ---
@@ -1199,7 +1243,31 @@ object Shaders {
             // still and wrong for a viewfinder: frozen noise reads as a dirty
             // sensor, not film. Animated off u_time so it moves.
             if (u_grain > 0.0) {
-                float n = hash12(floor(uv * u_resolution * 0.5) + floor(u_time * 24.0)) - 0.5;
+                // Size scales the noise cell, so a preset's grain size changes how
+                // coarse the grain is rather than only how strong.
+                vec2 gc = uv * u_resolution * (0.5 / max(u_grainSize, 0.05))
+                    + floor(u_time * 24.0);
+                // Roughness blends between one sample per cell, which is blocky,
+                // and four samples averaged, which is smooth. Adobe's roughness
+                // is the blockiness of the grain distribution, and this is the
+                // cheapest thing that moves that axis.
+                vec2 cell = floor(gc);
+                vec2 f = fract(gc);
+                float blocky = hash12(cell) - 0.5;
+                float smooth4 = (
+                    hash12(cell) - 0.5
+                    + hash12(cell + vec2(1.0, 0.0)) - 0.5
+                    + hash12(cell + vec2(0.0, 1.0)) - 0.5
+                    + hash12(cell + vec2(1.0, 1.0)) - 0.5
+                ) * 0.25;
+                vec2 sm = smoothstep(0.0, 1.0, f);
+                float bilinear = mix(
+                    mix(blocky, hash12(cell + vec2(1.0, 0.0)) - 0.5, sm.x),
+                    mix(hash12(cell + vec2(0.0, 1.0)) - 0.5,
+                        hash12(cell + vec2(1.0, 1.0)) - 0.5, sm.x),
+                    sm.y
+                ) * 0.25;
+                float n = mix(bilinear, blocky, u_grainRough);
                 c += n * u_grain * 0.47;
             }
 

@@ -31,11 +31,21 @@ class XmpImportTest {
             crs:Vibrance="+20"
             crs:Saturation="-5"
             crs:Sharpness="45"
+            crs:SharpnessRadius="1.20"
+            crs:Detail="25"
+            crs:Masking="40"
             crs:ColorTemp="5200"
             crs:Tint="+6"
             crs:Look="Medium High Contrast"
             crs:ToneCurvePV2012="0, 0, 255, 255, 128, 132, 64, 96, 192, 208"
             crs:GrainAmount="18"
+            crs:GrainSize="60"
+            crs:GrainRoughness="70"
+            crs:PostCropVignetteAmount="-22"
+            crs:PostCropVignetteMidpoint="65"
+            crs:PostCropVignetteFeather="75"
+            crs:PostCropVignetteRoundness="+12"
+            crs:PostCropVignetteAspect="+8"
           />
          </rdf:RDF>
         </x:xmpmeta>
@@ -210,9 +220,20 @@ class XmpImportTest {
     fun `the keys with no Lab equivalent are reported, not vanished`() {
         val res = XmpImport.parse(modern)
         val dropped = res.ignored.map { it.key }.toSet()
-        for (k in listOf("Look", "GrainAmount")) {
+        // The only keys with no Lab equivalent left: Adobe's proprietary curve
+        // sets, and the two vignette shape parameters. GrainAmount now maps, and
+        // does, because the grain got real size and roughness parameters.
+        // ToneCurveName is metadata, not a look setting, so it is deliberately
+        // absent from the report rather than listed as dropped.
+        for (k in listOf(
+            "Look", "PostCropVignetteRoundness", "PostCropVignetteAspect",
+        )) {
             assertTrue("$k was dropped without being reported", k in dropped)
         }
+        assertTrue(
+            "GrainAmount should be applied now, not dropped",
+            res.applied.any { it.key == "GrainAmount" },
+        )
         assertTrue("the report should still name the keys it did handle",
             res.applied.map { it.key }.containsAll(
                 listOf("Texture", "Clarity", "Dehaze", "Highlights2012", "Shadows2012")))

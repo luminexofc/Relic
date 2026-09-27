@@ -42,6 +42,13 @@ data class LabUniforms(
     val ranges: FloatArray,
     /** `[texture, clarity, dehaze]`, each -1..1. */
     val local: FloatArray,
+    val sharpRadius: Float,
+    val detail: Float,
+    val masking: Float,
+    val grainSize: Float,
+    val grainRough: Float,
+    val vigMid: Float,
+    val vigFeather: Float,
     val curveTex: ByteArray?,
     /** Tone curve blend. Zero also means "no curve bound". */
     val curveAmount: Float,
@@ -119,6 +126,13 @@ data class LabUniforms(
                 markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
                 ranges = recipe.rangeArray(),
             local = recipe.localArray(),
+            sharpRadius = recipe.sharpRadius,
+            detail = recipe.detail,
+            masking = recipe.masking,
+            grainSize = recipe.grainSize,
+            grainRough = recipe.grainRough,
+            vigMid = recipe.vigMidpoint,
+            vigFeather = recipe.vigFeather,
             curveTex = if (recipe.toneCurveActive) {
                 ToneCurve.toRgba(ToneCurve.parseGroup(recipe.toneCurves))
             } else {

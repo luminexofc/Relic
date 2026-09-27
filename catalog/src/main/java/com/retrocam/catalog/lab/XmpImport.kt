@@ -99,6 +99,15 @@ object XmpImport {
         var warmth = 0f
         var tint = 0f
         var sharpen = 0f
+        var sharpRadius = 1f
+        var detail = 0f
+        var masking = 0f
+        var grain = 0f
+        var grainSize = 1f
+        var grainRough = 0.5f
+        var vigMid = 0.5f
+        var vigFeather = 0.5f
+        var vignette = 0f
 
         fun add(key: String, value: String, mapsTo: String, approx: Boolean = false) {
             applied += XmpApplied(key, value, mapsTo, approx)
@@ -240,10 +249,77 @@ object XmpImport {
             add(key, q(v), "${key.uppercase()} = ${q(m)}")
         }
 
+        // ---- operator parameters, the small ones that change the look a lot ----
+        // SharpnessRadius, Detail and Masking. Masking is the important one: it
+        // is a threshold on the local difference, and without it a preset tuned
+        // to a threshold rings every flat patch of sky.
+        num(a["SharpnessRadius"])?.let {
+            val r = it.coerceIn(0.5f, 3f)
+            sharpRadius = r
+            add("SharpnessRadius", q(it), "SHARP RADIUS = ${q(r)}", approx = true)
+        }
+        num(a["Detail"])?.let {
+            if (it != 0f) {
+                val d = (it / 100f).coerceIn(0f, 1f)
+                detail = d
+                add("Detail", q(it), "DETAIL = ${q(d)}")
+            }
+        }
+        num(a["Masking"])?.let {
+            if (it != 0f) {
+                val m = (it / 100f).coerceIn(0f, 1f)
+                masking = m
+                add("Masking", q(it), "MASKING = ${q(m)}")
+            }
+        }
+
+        // ---- grain distribution, and the vignette falloff ----
+        // GrainAmount maps onto the Lab's own grain, which is the one thing the
+        // earlier "units differ" note was wrong about: the range is the same, it
+        // is the distribution that needed real parameters, and those are above.
+        num(a["GrainAmount"])?.let {
+            if (it != 0f) {
+                grain = (it / 100f).coerceIn(0f, 1f)
+                add("GrainAmount", q(it), "GRAIN = ${q(grain)}")
+            }
+        }
+        num(a["GrainSize"])?.let {
+            // Adobe's GrainSize is 0..100, 50 neutral; the Lab's is a 0.5..3
+            // multiplier, so the scale is remapped rather than divided.
+            val sz = (0.5f + (it / 100f) * 2.5f).coerceIn(0.5f, 3f)
+            grainSize = sz
+            add("GrainSize", q(it), "GRAIN SIZE = ${q(sz)}", approx = true)
+        }
+        num(a["GrainRoughness"])?.let {
+            val r = (it / 100f).coerceIn(0f, 1f)
+            grainRough = r
+            add("GrainRoughness", q(it), "GRAIN ROUGH = ${q(r)}", approx = true)
+        }
+        // Midpoint and Feather are 0..100 with 50 neutral. Roundness and Aspect
+        // change the shape of the falloff rather than its strength and are not
+        // implemented; they are reported as dropped below.
+        num(a["PostCropVignetteMidpoint"])?.let {
+            val v = (it / 100f).coerceIn(0f, 1f)
+            vigMid = v
+            add("PostCropVignetteMidpoint", q(it), "VIGNETTE MIDPOINT = ${q(v)}", approx = true)
+        }
+        num(a["PostCropVignetteFeather"])?.let {
+            val v = (it / 100f).coerceIn(0f, 1f)
+            vigFeather = v
+            add("PostCropVignetteFeather", q(it), "VIGNETTE FEATHER = ${q(v)}", approx = true)
+        }
+        num(a["PostCropVignetteAmount"])?.let {
+            if (it != 0f) {
+                val v = (kotlin.math.abs(it) / 100f).coerceIn(0f, 1f)
+                vignette = v
+                add("PostCropVignetteAmount", q(it), "VIGNETTE = ${q(v)}", approx = true)
+            }
+        }
+
         // ---- everything else, reported rather than silently dropped ----
         for (k in listOf("AutoBrightness", "Auto Tone")) drop(k, "needs a scene analysis")
-        for (k in listOf("GrainAmount", "PostCropVignetteAmount")) {
-            drop(k, "units differ, no honest mapping")
+        for (k in listOf("PostCropVignetteRoundness", "PostCropVignetteAspect")) {
+            drop(k, "changes the falloff shape, not its strength; not implemented")
         }
 
         drop("ToneCurveName", "a named curve set, not a value")
@@ -277,6 +353,15 @@ object XmpImport {
                 texture = local[0] ?: 0f,
                 clarity = local[1] ?: 0f,
                 dehaze = local[2] ?: 0f,
+                sharpRadius = sharpRadius,
+                detail = detail,
+                masking = masking,
+                grain = grain,
+                grainSize = grainSize,
+                grainRough = grainRough,
+                vigMidpoint = vigMid,
+                vigFeather = vigFeather,
+                vignette = vignette,
             ),
             applied = applied,
             ignored = ignored,

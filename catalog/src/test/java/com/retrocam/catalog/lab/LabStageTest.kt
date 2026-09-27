@@ -294,7 +294,7 @@ class LabStageTest {
      * for the wrong reason.
      */
     private fun payload(stageField: String): String {
-        val f = MutableList(40) { "0" }
+        val f = MutableList(47) { "0" }
         f[0] = RecipeCodec.VERSION.toString()
         f[1] = java.util.Base64.getUrlEncoder().withoutPadding()
             .encodeToString("T".toByteArray())
@@ -309,7 +309,13 @@ class LabStageTest {
         f[27] = "-"   // watermarkId
         f[31] = stageField
         f[32] = "-"   // tone curve
-        // 33..39 are the range and local-contrast controls, already "0"
+        // sharpRadius, grainSize default above 0 and vigMid/vigFeather to 0.5.
+        f[40] = "1"
+        f[43] = "1"
+        f[45] = "0.5"
+        f[46] = "0.5"
+        // 33..47 are the tone, local and operator controls.
+        // 40..46 have non-zero defaults, so a zero there must still decode.
         return f.joinToString(",")
     }
 

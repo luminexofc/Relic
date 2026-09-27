@@ -116,6 +116,23 @@ data class LabRecipe(
     val texture: Float = 0f,
     val clarity: Float = 0f,
     val dehaze: Float = 0f,
+
+    // Adobe's sharpening detail. `sharpen` above stays as the plain amount so
+    // existing recipes are untouched; these are the XMP parameters around it.
+    val sharpRadius: Float = 1f,
+    val detail: Float = 0f,
+    val masking: Float = 0f,
+
+    // Adobe's grain distribution. The Lab's own `grain` stays the amount.
+    val grainSize: Float = 1f,
+    val grainRough: Float = 0.5f,
+
+    // Adobe's vignette falloff. Roundness and Aspect are NOT implemented: they
+    // change the shape of the falloff rather than its strength, and the visual
+    // difference on a phone viewfinder is small next to the shader complexity.
+    // The XMP import reports them as dropped rather than pretending.
+    val vigMidpoint: Float = 0.5f,
+    val vigFeather: Float = 0.5f,
 ) {
     /** True when any local-contrast control is off neutral. */
     val localActive: Boolean
@@ -170,6 +187,9 @@ data class LabRecipe(
         if (texture != 0f) add("texture")
         if (clarity != 0f) add("clarity")
         if (dehaze != 0f) add("dehaze")
+        if (detail != 0f) add("detail")
+        if (masking != 0f) add("masking")
+        if (vigMidpoint != 0.5f || vigFeather != 0.5f) add("vignette falloff")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -232,6 +252,13 @@ data class LabRecipe(
             texture = r.texture.coerceIn(-1f, 1f),
             clarity = r.clarity.coerceIn(-1f, 1f),
             dehaze = r.dehaze.coerceIn(-1f, 1f),
+            sharpRadius = r.sharpRadius.coerceIn(0.5f, 3f),
+            detail = r.detail.coerceIn(0f, 1f),
+            masking = r.masking.coerceIn(0f, 1f),
+            grainSize = r.grainSize.coerceIn(0.5f, 3f),
+            grainRough = r.grainRough.coerceIn(0f, 1f),
+            vigMidpoint = r.vigMidpoint.coerceIn(0f, 1f),
+            vigFeather = r.vigFeather.coerceIn(0f, 1f),
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,
