@@ -132,6 +132,10 @@ fun ShadcnDialog(
  * A bottom sheet in shadcn's language: a scrim, a raised surface, and the
  * Radix enter/exit timing.
  *
+ * The scrim is deliberately faint (0.25). The point of opening a filter sheet on
+ * a camera is to see what a filter does to the live view, and a heavy scrim hides
+ * the very thing the sheet is for.
+ *
  * One deliberate regression against Material's `ModalBottomSheet`: there is no
  * drag-to-dismiss. Tapping the scrim and the back gesture both work, but a
  * Material sheet can be flicked away, and this one cannot. Worth revisiting if it
@@ -158,7 +162,7 @@ fun ShadcnBottomSheet(
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.6f * t))
+            .background(Color.Black.copy(alpha = 0.25f * t))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

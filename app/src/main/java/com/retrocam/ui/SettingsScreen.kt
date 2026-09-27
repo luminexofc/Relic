@@ -142,7 +142,6 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                 subtitle = TIMER_LABELS[TIMER_VALUES.indexOf(state.timerSeconds).coerceAtLeast(0)],
                 onClick = { dialog = "timer" },
             )
-            RowDivider()
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -163,15 +162,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
 
         SectionLabel("Filters")
         SettingsCard {
-            FilterStrip(
-                specs = state.specs,
-                selectedId = state.filter.id,
-                favorites = state.favorites,
-                thumbnails = thumbnails,
-                onSelect = viewModel::selectFilter,
-                onToggleFavorite = viewModel::toggleFavorite,
-                reducedMotion = reduced,
-            )
+            
             RowDivider()
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 8.dp),

@@ -8,6 +8,7 @@ import com.retrocam.ui.components.ShadcnButton
 import com.retrocam.ui.components.ShadcnBottomSheet
 import com.retrocam.ui.components.ShadcnDialog
 import com.retrocam.ui.components.ShadcnInput
+import com.retrocam.ui.components.ShadcnSeparator
 import com.retrocam.ui.components.ShadcnSlider
 import com.retrocam.ui.theme.AppType
 import com.retrocam.ui.theme.ShadcnRadius
@@ -1096,6 +1097,9 @@ private fun FilterDrawer(
                 label = "Intensity",
                 modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
             )
+            // The strip is what you came here for, so it is separated from the
+            // controls above it rather than butting straight up against them.
+            ShadcnSeparator(Modifier.padding(horizontal = 24.dp, vertical = 14.dp))
             if (hasSize) {
                 Text(
                     text = "SIZE $sizeLabel",
@@ -1136,7 +1140,7 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") })
+        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") }, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(16.dp))
         Box(
             Modifier
@@ -1145,7 +1149,7 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
                 .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
         )
         Spacer(Modifier.width(16.dp))
-        ModePill("Video", active = mode == "video", onClick = { onMode("video") })
+        ModePill("Video", active = mode == "video", onClick = { onMode("video") }, modifier = Modifier.weight(1f))
         Spacer(Modifier.width(16.dp))
         Box(
             Modifier
@@ -1154,20 +1158,30 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
                 .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
         )
         Spacer(Modifier.width(16.dp))
-        ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") })
+        ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") }, modifier = Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun ModePill(label: String, active: Boolean, onClick: () -> Unit) {
+private fun ModePill(
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Text(
         text = label,
         fontFamily = AppType.Sans,
         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         color = if (active) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-        modifier = Modifier
-            .width(110.dp)
+        modifier = modifier
+            .clip(RoundedCornerShape(ShadcnRadius.Lg))
+            .background(
+                if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp, horizontal = 4.dp)
             .border(
                 1.dp,
                 if (active) MaterialTheme.colorScheme.primary else Color.Transparent,

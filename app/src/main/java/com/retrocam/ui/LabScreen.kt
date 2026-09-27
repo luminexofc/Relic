@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -149,6 +150,7 @@ fun LabScreen(viewModel: CameraViewModel) {
         Row(
             Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -255,11 +257,6 @@ fun LabScreen(viewModel: CameraViewModel) {
             onLutAmount = viewModel::setLabLutAmount,
             palette = palette,
             watermarks = watermarks,
-            onToggleStamp = viewModel::toggleLabStamp,
-            onStampText = viewModel::setLabStampText,
-            onStampColour = viewModel::setLabStampColour,
-            onStampPosition = viewModel::setLabStampPosition,
-            onStampAlpha = viewModel::setLabStampAlpha,
             onPickWatermark = viewModel::setLabWatermark,
             onImportWatermark = { markPicker.launch("image/*") },
             onWatermarkAlpha = viewModel::setLabWatermarkAlpha,

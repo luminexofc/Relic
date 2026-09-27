@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.retrocam.catalog.lab.LAB_EFFECTS
 import com.retrocam.catalog.lab.LabAdjustments
-import com.retrocam.catalog.lab.STAMP_POSITIONS
 import com.retrocam.catalog.lab.effectValue
 import com.retrocam.catalog.lab.LabTemplates
 import com.retrocam.catalog.lab.SavedRecipe
@@ -91,11 +90,6 @@ fun FilterLabPanel(
     onLutAmount: (Float) -> Unit,
     palette: List<Int>,
     watermarks: List<Pair<String, String>>,
-    onToggleStamp: () -> Unit,
-    onStampText: (String) -> Unit,
-    onStampColour: (Int) -> Unit,
-    onStampPosition: (Int) -> Unit,
-    onStampAlpha: (Float) -> Unit,
     onPickWatermark: (String?) -> Unit,
     onImportWatermark: () -> Unit,
     onWatermarkAlpha: (Float) -> Unit,
@@ -217,23 +211,7 @@ fun FilterLabPanel(
                 item { ImportChip("+ IMPORT LUT", dim, onImportLut) }
             }
             Spacer(Modifier.height(10.dp))
-            LabSectionToggle("1990s DATE STAMP", !recipe.stampText.isNullOrBlank(), accent, dim, onToggleStamp)
-            val stampText = recipe.stampText
-            if (!stampText.isNullOrBlank()) {
-                ShadcnInput(
-                    value = stampText,
-                    onValueChange = onStampText,
-                    placeholder = "'98 08 13",
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                )
-                SwatchRow(
-                    listOf(0xFFFF8C14.toInt(), 0xFFFF3B30.toInt(), 0xFF34C759.toInt(), 0xFF00C7BE.toInt(), 0xFFFFFFFF.toInt()),
-                    recipe.stampColor, accent, dim,
-                ) { onStampColour(it) }
-                PositionRow(recipe.stampPosition.ordinal, accent, dim) { onStampPosition(it) }
-                LabSlider("STAMP OPACITY", recipe.stampAlpha, 0f, 1f, accent, dim, onStampAlpha)
-            }
-            Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(8.dp))
             Text("WATERMARK", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
@@ -642,7 +620,6 @@ private fun TemplateChip(
     }
 }
 
-
 /**
  * Duotone shadow/highlight swatches. Not a full colour picker: two presets plus
  * a hue slider would be a whole screen, and duotone only needs two anchors.
@@ -706,28 +683,6 @@ private fun SwatchRow(
     }
 }
 
-
-@Composable
-private fun LabSectionToggle(
-    label: String,
-    on: Boolean,
-    accent: androidx.compose.ui.graphics.Color,
-    dim: androidx.compose.ui.graphics.Color,
-    onToggle: () -> Unit,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, fontFamily = AppType.Sans, fontSize = 10.sp, color = if (on) accent else dim)
-        Text(if (on) "ON" else "OFF", fontFamily = AppType.Sans, fontSize = 10.sp, color = if (on) accent else dim)
-    }
-}
-
 @Composable
 private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
     Box(
@@ -740,19 +695,3 @@ private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, o
     }
 }
 
-@Composable
-private fun PositionRow(
-    selected: Int,
-    accent: androidx.compose.ui.graphics.Color,
-    dim: androidx.compose.ui.graphics.Color,
-    onPick: (Int) -> Unit,
-) {
-    LazyRow(
-        Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        items(STAMP_POSITIONS.size) { i ->
-            TemplateChip(STAMP_POSITIONS[i].label, selected == i, accent, dim) { onPick(i) }
-        }
-    }
-}
