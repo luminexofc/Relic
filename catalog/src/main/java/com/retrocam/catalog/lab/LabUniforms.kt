@@ -80,39 +80,39 @@ data class LabUniforms(
             // Adobe's order needs the knobs apart: contrast is applied second
             // while temp/tint and saturation come after the range and local work.
             val g = LabGrading.split(recipe.templateMatrix(), recipe.adjustments)
-            return LabUniforms(
-            ccm = g.template,
-            contrast = g.contrast,
-            brightness = g.brightness,
-            rScale = g.rScale,
-            gScale = g.gScale,
-            bScale = g.bScale,
-            saturation = g.saturation,
-            vignette = recipe.vignette.coerceIn(0f, 1f),
-            grain = recipe.grain.coerceIn(0f, 1f),
-            sharpen = recipe.sharpen.coerceIn(0f, 1f),
-            blur = recipe.blur.coerceIn(0f, 1f),
-            glitch = recipe.glitch.coerceIn(0f, 1f),
-            duotoneShadow = unpackRgb(recipe.duotoneShadow),
-            duotoneHighlight = unpackRgb(recipe.duotoneHighlight),
-            duotone = recipe.duotone.coerceIn(0f, 1f),
-            lutAmount = if (recipe.lutActive) recipe.lutAmount.coerceIn(0f, 1f) else 0f,
-            stampRect = if (recipe.stampText.isNullOrBlank()) {
-                NO_RECT
-            } else {
-                OverlayPlacement.rect(recipe.stampPosition, stampAspect)
-            },
-            stampAlpha = recipe.stampAlpha.coerceIn(0f, 1f),
-            markRect = if (recipe.watermarkId == null) {
-                NO_RECT
-            } else {
-                OverlayPlacement.rect(recipe.watermarkPosition, markAspect, OverlayPlacement.MARK_PAD, OverlayPlacement.MARK_PAD)
-            },
-            markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
-            gamma = recipe.gamma.coerceIn(0.2f, 3f),
-            splitAmount = recipe.splitAmount.coerceIn(0f, 1f),
-            shadowTint = unpackRgb(recipe.shadowTint),
-            highlightTint = unpackRgb(recipe.highlightTint),
+                return LabUniforms(
+                ccm = g.template,
+                contrast = g.contrast,
+                brightness = g.brightness,
+                rScale = g.rScale,
+                gScale = g.gScale,
+                bScale = g.bScale,
+                saturation = g.saturation,
+                vignette = recipe.vignette.coerceIn(0f, 1f),
+                grain = recipe.grain.coerceIn(0f, 1f),
+                sharpen = recipe.sharpen.coerceIn(0f, 1f),
+                blur = recipe.blur.coerceIn(0f, 1f),
+                glitch = recipe.glitch.coerceIn(0f, 1f),
+                duotoneShadow = unpackRgb(recipe.duotoneShadow),
+                duotoneHighlight = unpackRgb(recipe.duotoneHighlight),
+                duotone = recipe.duotone.coerceIn(0f, 1f),
+                lutAmount = if (recipe.lutActive) recipe.lutAmount.coerceIn(0f, 1f) else 0f,
+                stampRect = if (recipe.stampText.isNullOrBlank()) {
+                    NO_RECT
+                } else {
+                    OverlayPlacement.rect(recipe.stampPosition, stampAspect)
+                },
+                stampAlpha = recipe.stampAlpha.coerceIn(0f, 1f),
+                markRect = if (recipe.watermarkId == null) {
+                    NO_RECT
+                } else {
+                    OverlayPlacement.rect(recipe.watermarkPosition, markAspect, OverlayPlacement.MARK_PAD, OverlayPlacement.MARK_PAD)
+                },
+                markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
+                gamma = recipe.gamma.coerceIn(0.2f, 3f),
+                splitAmount = recipe.splitAmount.coerceIn(0f, 1f),
+                shadowTint = unpackRgb(recipe.shadowTint),
+                highlightTint = unpackRgb(recipe.highlightTint),
             )
         }
     }

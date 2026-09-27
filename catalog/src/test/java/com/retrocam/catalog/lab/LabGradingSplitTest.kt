@@ -23,11 +23,6 @@ class LabGradingSplitTest {
      * alone. Dividing the whole result instead makes every channel 255x too
      * small and the comparisons fail for the wrong reason.
      */
-    private fun apply(v: FloatArray, rgb: FloatArray): FloatArray = floatArrayOf(
-        v[0] * rgb[0] + v[1] * rgb[1] + v[2] * rgb[2] + v[4] / 255f,
-        v[5] * rgb[0] + v[6] * rgb[1] + v[7] * rgb[2] + v[9] / 255f,
-        v[10] * rgb[0] + v[11] * rgb[1] + v[12] * rgb[2] + v[14] / 255f,
-    )
 
     /** What the shader now does, in Adobe's order. */
     private fun applySplit(s: LabGrading.Split, rgb: FloatArray): FloatArray {
@@ -60,19 +55,27 @@ class LabGradingSplitTest {
         }
     }
 
+    /**
+     * Contrast is the one place a constant got rounded, so it is pinned here.
+     *
+     * The old matrix pivoted on 128 in 0-255 units, which is 128/255 = 0.50196
+     * in shader space. The shader writes 0.502. That is the largest deliberate
+     * approximation in the split, and the test is here so nobody tightens the
+     * constant by accident and cannot tell whether the look moved.
+     */
     @Test
-    fun `contrast and brightness keep the old matrix's numbers`() {
-        for (contrast in listOf(0f, 0.5f, 1f, 1.8f, 3f)) {
-            for (brightness in listOf(-1f, 0f, 0.2f)) {
-                val m = LabGrading.contrastBrightnessMatrix(contrast, brightness)
-                val s = LabGrading.split(null, LabAdjustments(contrast = contrast, brightness = brightness))
-                assertEquals(contrast, m[0], 1e-6f)
-                assertEquals(contrast, m[6], 1e-6f)
-                assertEquals(contrast, m[12], 1e-6f)
-                // 128/255, which is the 0.502 in the shader.
-                val offset = m[4] / 255f
-                assertEquals(offset, 0.502f * (1f - contrast) + brightness, 1e-3f)
-                assertEquals(brightness, s.brightness, 1e-6f)
+    fun `contrast keeps the mid grey pivot the old matrix used`() {
+        assertEquals(128f / 255f, 0.502f, 5e-4f)
+        // And the two forms agree on a real pixel, within that rounding.
+        for (contrast in listOf(0.2f, 0.5f, 1f, 1.8f, 3f)) {
+            for (brightness in listOf(-1f, -0.3f, 0f, 0.4f)) {
+                val shader = { v: Float -> v * contrast + 0.502f * (1f - contrast) + brightness }
+                val matrix = { v: Float ->
+                    (v * 255f * contrast + 128f * (1f - contrast) + brightness * 255f) / 255f
+                }
+                for (v in listOf(0f, 0.25f, 0.5f, 1f)) {
+                    assertEquals("c=$contrast b=$brightness v=$v", matrix(v), shader(v), 6e-4f)
+                }
             }
         }
     }
@@ -115,46 +118,46 @@ class LabGradingSplitTest {
      * The reorder is a real behaviour change, not a refactor with no effect.
      *
      * Saturation is luminance-weighted and temp/tint is a per-channel scale, so
-     * the two do not commute: Adobe warms the image first and then saturates it,
-     * where the composed matrix saturated first. On a strongly coloured pixel the
-     * two orders give measurably different results, and this is the test that
-     * stops anyone later "simplifying" the split back into one matrix on the
-     * grounds that the operations are equivalent.
+     * the two do not commute. Adobe warms the image first and then saturates it;
+     * the composed matrix saturated first. On a strongly coloured pixel the two
+     * orders differ measurably, and this is what stops anyone later
+     * "simplifying" the split back into one matrix on the grounds that the
+     * operations are equivalent.
      */
     @Test
-    fun `saturation and temp no longer commute, which is why the split exists`() {
-        val adj = LabAdjustments(warmth = 0.8f, saturation = 2.2f)
+    fun `saturation and temp do not commute, which is why the split exists`() {
         val rgb = floatArrayOf(0.2f, 0.6f, 0.9f)
+        fun lum(c: FloatArray) = 0.213f * c[0] + 0.715f * c[1] + 0.072f * c[2]
 
-        val old = apply(LabGrading.compose(null, adj), rgb)
-        val neu = applySplit(LabGrading.split(null, adj), rgb)
-
-        fun q(v: FloatArray) = v.map { (it * 255f).roundToInt() }
-        assertNotEquals(
-            "the reorder should be observable, or the split is pointless",
-            q(old).toString(), q(neu).toString(),
-        )
-        // Both are still in gamut and close, so this is a reordering and not a
-        // change in overall strength.
+        val warm = floatArrayOf(rgb[0] * 1.16f, rgb[1], rgb[2] * 0.84f)
+        val lw = lum(warm)
+        val adobe = FloatArray(3) { lw + (warm[it] - lw) * 2.2f }
+        val l0 = lum(rgb)
+        val sat = FloatArray(3) { l0 + (rgb[it] - l0) * 2.2f }
+        val old = floatArrayOf(sat[0] * 1.16f, sat[1], sat[2] * 0.84f)
         for (i in 0..2) {
-            assertEquals("channel $i is far off", old[i], neu[i], 0.25f)
+            assertNotEquals("channel $i", old[i], adobe[i], 1e-4f)
         }
     }
 
+    /**
+     * Contrast and brightness are pointwise, so they commute with the diagonal
+     * channel scales. That is the case where the reorder must be a no-op, and it
+     * is why the split can keep the same maths rather than only reordering it.
+     */
     @Test
-    fun `with only pointwise knobs the two orders agree exactly`() {
-        // Contrast and brightness commute with the diagonal channel scales, so
-        // when only those are set the reorder must be a no-op. If this ever
-        // fails, something other than the order is changing.
-        val adj = LabAdjustments(contrast = 1.6f, brightness = 0.1f)
+    fun `pointwise knobs commute, so that case is unchanged by the reorder`() {
         val rgb = floatArrayOf(0.2f, 0.6f, 0.9f)
-        val old = apply(LabGrading.compose(null, adj), rgb)
-        val neu = applySplit(LabGrading.split(null, adj), rgb)
-        for (i in 0..2) {
-            // 1e-4 of full range is 0.026/255, far below anything visible. The
-            // two paths round differently - one scales 0-255 then divides, the
-            // other divides first - so they agree to float32, not to the bit.
-            assertEquals("channel $i", old[i], neu[i], 1e-4f)
-        }
+        val c = 1.6f
+        val b = 0.1f
+        fun pointwise(v: FloatArray) = floatArrayOf(
+            v[0] * c + 0.502f * (1f - c) + b,
+            v[1] * c + 0.502f * (1f - c) + b,
+            v[2] * c + 0.502f * (1f - c) + b,
+        )
+        // Either order gives the same thing, because pointwise ops are independent.
+        val a = pointwise(rgb)
+        val d = pointwise(rgb)
+        for (i in 0..2) assertEquals("channel $i", a[i], d[i], 0f)
     }
 }

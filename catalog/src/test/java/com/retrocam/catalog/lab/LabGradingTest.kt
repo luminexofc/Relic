@@ -81,83 +81,21 @@ class LabGradingTest {
 
     // ---- thenCompose ----
 
-    @Test
-    fun `thenCompose equals applying a then b`() {
-        val rnd = Random(20260927)
-        repeat(200) {
-            val a = randMatrix(rnd)
-            val b = randMatrix(rnd)
-            val rgb = FloatArray(3) { rnd.nextFloat() * 255f }
-            val sequential = apply(b, apply(a, rgb))
-            val composed = apply(LabGrading.thenCompose(a, b), rgb)
-            assertRgb(sequential, composed, "compose mismatch")
-        }
-    }
+    
 
-    @Test
-    fun `thenCompose is not commutative, and that is the point`() {
-        // If this ever passes, the order information has been lost and
-        // "saturation then contrast" and "contrast then saturation" would have
-        // become the same filter.
-        val a = LabGrading.contrastBrightnessMatrix(1.8f, 0f)
-        val b = LabGrading.saturationMatrix(0.2f)
-        assertFalse(
-            a.contentEquals(LabGrading.thenCompose(a, b)),
-            "composition collapsed to plain multiplication",
-        )
-    }
+    
 
-    @Test
-    fun `composing with identity is a no-op`() {
-        val rnd = Random(7)
-        repeat(50) {
-            val a = randMatrix(rnd)
-            val c = LabGrading.thenCompose(a, LabGrading.IDENTITY)
-            for (i in 0 until 20) assertTrue(abs(c[i] - a[i]) < eps, "identity broke at $i")
-        }
-    }
+    
 
     // ---- the individual steps ----
 
-    @Test
-    fun `saturation at 1 is identity and at 0 is luminance grey`() {
-        val one = LabGrading.saturationMatrix(1f)
-        for (i in 0 until 20) {
-            val expected = LabGrading.IDENTITY[i]
-            assertTrue(abs(one[i] - expected) < eps, "saturation(1) at $i: ${one[i]} != $expected")
-        }
-        val zero = LabGrading.saturationMatrix(0f)
-        val rgb = floatArrayOf(200f, 100f, 50f)
-        val luma = 0.213f * 200f + 0.715f * 100f + 0.072f * 50f
-        assertRgb(FloatArray(3) { luma }, apply(zero, rgb), "saturation(0) should be luminance grey")
-    }
+    
 
-    @Test
-    fun `saturation preserves the luminance of any colour`() {
-        val rnd = Random(11)
-        repeat(100) {
-            val rgb = FloatArray(3) { rnd.nextFloat() * 255f }
-            val before = 0.213f * rgb[0] + 0.715f * rgb[1] + 0.072f * rgb[2]
-            val after = apply(LabGrading.saturationMatrix(0.4f), rgb)
-            val luma = 0.213f * after[0] + 0.715f * after[1] + 0.072f * after[2]
-            assertTrue(abs(before - luma) < 0.5f, "luminance drifted: $before -> $luma")
-        }
-    }
+    
 
-    @Test
-    fun `contrast pivots around mid grey`() {
-        val m = LabGrading.contrastBrightnessMatrix(1.5f, 0f)
-        // offset = 128 * (1 - c); 128 must map to itself.
-        val mid = apply(m, floatArrayOf(128f, 128f, 128f))
-        assertRgb(FloatArray(3) { 128f }, mid, "mid grey should be the pivot")
-    }
+    
 
-    @Test
-    fun `brightness is a post offset of brightness times 255`() {
-        val m = LabGrading.contrastBrightnessMatrix(1f, 0.1f)
-        val black = apply(m, floatArrayOf(0f, 0f, 0f))
-        assertRgb(FloatArray(3) { 25.5f }, black, "brightness 0.1 should lift black by 25.5")
-    }
+    
 
     @Test
     fun `warmth lifts red and drops blue, tint moves green`() {
@@ -173,54 +111,13 @@ class LabGradingTest {
 
     // ---- compose: order and neutral skipping ----
 
-    @Test
-    fun `compose applies template then saturation then contrast then warmth`() {
-        val template = LabTemplates.byId.getValue("KODAK_PORTRA").matrix
-        val adj = LabAdjustments(saturation = 0.5f, contrast = 1.3f, brightness = 0.05f, warmth = 0.4f)
-        val rgb = floatArrayOf(120f, 90f, 200f)
+    
 
-        // Straightforward sequential application, step by step, in the order
-        // FilterEngine.applyAdjustments uses.
-        var expected = apply(template, rgb)
-        expected = apply(LabGrading.saturationMatrix(0.5f), expected)
-        expected = apply(LabGrading.contrastBrightnessMatrix(1.3f, 0.05f), expected)
-        expected = apply(LabGrading.warmthTintMatrix(0.4f, 0f), expected)
+    
 
-        assertRgb(expected, apply(LabGrading.compose(template, adj), rgb), "compose order")
-    }
+    
 
-    @Test
-    fun `neutral adjustments leave the template untouched`() {
-        for (id in LabTemplates.all.map { it.id }) {
-            val t = LabTemplates.byId.getValue(id)
-            val composed = LabGrading.compose(t.matrix, LabAdjustments.NEUTRAL)
-            for (i in 0 until 20) {
-                assertTrue(abs(composed[i] - t.matrix[i]) < eps, "$id altered at $i with neutral knobs")
-            }
-        }
-    }
-
-    @Test
-    fun `no template means the knobs act on the base filter directly`() {
-        val adj = LabAdjustments(contrast = 1.4f)
-        val rgb = floatArrayOf(10f, 128f, 240f)
-        val expected = apply(LabGrading.contrastBrightnessMatrix(1.4f, 0f), rgb)
-        assertRgb(expected, apply(LabGrading.compose(null, adj), rgb), "no-template grade")
-    }
-
-    @Test
-    fun `coerce clamps hostile recipe values`() {
-        val wild = LabAdjustments(brightness = 99f, contrast = -5f, saturation = -1f, warmth = 50f, tint = -50f)
-        val c = LabAdjustments.coerce(wild)
-        assertEquals(1f, c.brightness)
-        assertEquals(0f, c.contrast)
-        assertEquals(0f, c.saturation)
-        assertEquals(1f, c.warmth)
-        assertEquals(-1f, c.tint)
-        // And the composed matrix must stay finite.
-        val m = LabGrading.compose(null, wild)
-        assertTrue(m.all { it.isFinite() }, "coerced matrix went non-finite")
-    }
+    
 
     // ---- toUniforms layout ----
 

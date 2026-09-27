@@ -43,36 +43,9 @@ object LabGrading {
         0f, 0f, 0f, 1f, 0f,
     )
 
-    /**
-     * Android `ColorMatrix.setSaturation`, transcribed. Luminance-preserving:
-     * the standard 0.213/0.715/0.072 weighting.
-     */
-    fun saturationMatrix(s: Float): FloatArray {
-        val lr = 0.213f
-        val lg = 0.715f
-        val lb = 0.072f
-        return floatArrayOf(
-            lr + s * (1f - lr), lg * (1f - s), lb * (1f - s), 0f, 0f,
-            lr * (1f - s), lg + s * (1f - lg), lb * (1f - s), 0f, 0f,
-            lr * (1f - s), lg * (1f - s), lb + s * (1f - lb), 0f, 0f,
-            0f, 0f, 0f, 1f, 0f,
-        )
-    }
+    
 
-    /**
-     * Contrast pivots around mid-grey (128) with brightness as a post-offset, in
-     * 0-255 units. Transcribed from `FilterEngine.applyAdjustments`.
-     */
-    fun contrastBrightnessMatrix(contrast: Float, brightness: Float): FloatArray {
-        val c = contrast
-        val offset = 128f * (1f - c) + brightness * 255f
-        return floatArrayOf(
-            c, 0f, 0f, 0f, offset,
-            0f, c, 0f, 0f, offset,
-            0f, 0f, c, 0f, offset,
-            0f, 0f, 0f, 1f, 0f,
-        )
-    }
+    
 
     /**
      * Warmth scales red up / blue down, tint scales green. +-0.2 per unit, so
@@ -91,28 +64,7 @@ object LabGrading {
         )
     }
 
-    /**
-     * Compose two 4x5 row-vector matrices into the single matrix equivalent to
-     * applying [a] and then [b]. This is Android `ColorMatrix.postConcat`'s
-     * semantics: `b` is applied after `a`.
-     *
-     * With row vectors, `apply(a); apply(b)` is `in * (b * a)` on the linear
-     * part, and `b_linear * a_offset + b_offset` on the translation column.
-     */
-    fun thenCompose(a: FloatArray, b: FloatArray): FloatArray {
-        val c = FloatArray(20)
-        for (j in 0 until 4) {
-            for (k in 0 until 4) {
-                var sum = 0f
-                for (i in 0 until 4) sum += b[j * 5 + i] * a[i * 5 + k]
-                c[j * 5 + k] = sum
-            }
-            var t = b[j * 5 + 4]
-            for (i in 0 until 4) t += b[j * 5 + i] * a[i * 5 + 4]
-            c[j * 5 + 4] = t
-        }
-        return c
-    }
+    
 
     /**
      * The full grade for a recipe: optional template matrix, then the five
@@ -175,22 +127,7 @@ object LabGrading {
         )
     }
 
-    @Deprecated(
-        "Kept so the existing composition tests still have something to exercise. " +
-            "The shader no longer takes a composited matrix; use split().",
-    )
-    fun compose(template: FloatArray?, adjustments: LabAdjustments): FloatArray {
-        val a = LabAdjustments.coerce(adjustments)
-        var m = if (template != null && template.size == 20) template.copyOf() else IDENTITY.copyOf()
-        if (a.saturation != 1f) m = thenCompose(m, saturationMatrix(a.saturation))
-        if (a.contrast != 1f || a.brightness != 0f) {
-            m = thenCompose(m, contrastBrightnessMatrix(a.contrast, a.brightness))
-        }
-        if (a.warmth != 0f || a.tint != 0f) {
-            m = thenCompose(m, warmthTintMatrix(a.warmth, a.tint))
-        }
-        return m
-    }
+
 
     /**
      * Pack a composed 4x5 into the 12 floats the lab shader wants:
@@ -223,6 +160,4 @@ object LabGrading {
     /**
      * Convenience: template + knobs straight to shader uniforms.
      */
-    fun uniformsFor(template: FloatArray?, adjustments: LabAdjustments): FloatArray =
-        toUniforms(compose(template, adjustments))
 }
