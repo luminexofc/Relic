@@ -113,6 +113,9 @@ fun FilterLabPanel(
     onSelectStage: (Int) -> Unit,
     onShare: (String) -> Unit,
     onImportQr: () -> Unit,
+    xmpReport: com.retrocam.catalog.lab.XmpResult?,
+    onImportXmp: () -> Unit,
+    onDismissReport: () -> Unit,
     onDeleteLut: (String) -> Unit,
     onDeleteWatermark: (String) -> Unit,
     selectedRecipeId: String?,
@@ -166,6 +169,18 @@ fun FilterLabPanel(
                 onSelect = onSelectStage,
             )
         } else if (tab == 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ImportChip("IMPORT .XMP", accent) { onImportXmp() }
+                Text(
+                    "Lightroom / Camera Raw preset",
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                )
+            }
+            xmpReport?.let { XmpReportBlock(it, accent, dim, onDismissReport) }
             TemplateCarousel(recipe.templateId, accent, dim, onTemplate)
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
@@ -907,6 +922,81 @@ private fun StageChain(
     ) {
         com.retrocam.catalog.lab.LabPrimitives.chainable.forEach { p ->
             ImportChip(p.displayName, dim) { onAdd(p.id) }
+        }
+    }
+}
+
+/**
+ * What the last `.xmp` import actually did.
+ *
+ * Collapsed to one line by default, because the honest version of this report is
+ * long: a typical preset lists seven mappings and fourteen dropped settings, and
+ * putting all of that on screen unprompted would bury the controls. Expanded, it
+ * names every key on both sides and says why each one was dropped.
+ */
+@Composable
+private fun XmpReportBlock(
+    result: com.retrocam.catalog.lab.XmpResult,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onDismiss: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .border(1.dp, dim.copy(alpha = 0.4f), RoundedCornerShape(ShadcnRadius.Lg))
+            .clickable { open = !open }
+            .padding(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "${result.applied.size} mapped, ${result.ignored.size} not supported",
+                fontFamily = AppType.Sans, fontSize = 10.sp, color = accent,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (open) "HIDE" else "DETAILS",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+        }
+        if (open) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "APPLIED",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            result.applied.forEach { a ->
+                Text(
+                    (if (a.approx) "~ " else "") + a.key + " " + a.value + " \u2192 " + a.mapsTo,
+                    fontFamily = AppType.Sans, fontSize = 9.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "NOT SUPPORTED BY THE LAB",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            result.ignored.forEach { ig ->
+                Text(
+                    ig.key + ": " + ig.reason,
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "~ marks an approximation. A preset is always partial: the Lab has " +
+                    "seven knobs and an XMP has around forty settings.",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            ShadcnButton(
+                text = "Dismiss",
+                onClick = onDismiss,
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Sm,
+            )
         }
     }
 }

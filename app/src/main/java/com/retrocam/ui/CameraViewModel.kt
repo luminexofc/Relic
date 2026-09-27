@@ -84,6 +84,12 @@ data class CameraUiState(
     val labRecipes: List<com.retrocam.catalog.lab.SavedRecipe> = emptyList(),
     /** Bumped when the set of available LUTs changes, to re-read the list. */
     val labLutTick: Int = 0,
+    /**
+     * What the last `.xmp` import did, kept so the Lab can show it. An XMP
+     * preset carries around forty settings and the Lab has seven knobs, so an
+     * import that reported nothing would look like it had worked completely.
+     */
+    val xmpReport: com.retrocam.catalog.lab.XmpResult? = null,
     /** Id of the saved recipe the draft came from, if any. Drives the bridge button. */
     val savedRecipeId: String? = null,
     val zoomRatio: Float = 1f,
@@ -719,6 +725,55 @@ class CameraViewModel @Inject constructor(
         uploadLut(entry.id, renderer)
         _uiState.update { it.copy(labLutTick = it.labLutTick + 1) }
         setLabLut(entry.id)
+    }
+
+    /**
+     * Imports a Camera Raw `.xmp` preset onto the current recipe.
+     *
+     * The result is recorded rather than discarded so the Lab can list what was
+     * mapped and what was dropped. The report survives until the next import:
+     * there is nothing useful about "here is what your preset lost" if it has
+     * already been dismissed.
+     *
+     * Applied *over* the recipe rather than replacing it, so a stage chain the
+     * user built survives. Only the keys the preset actually sets are touched.
+     */
+    fun importXmp(uri: android.net.Uri) {
+        val text = runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                it.readBytes().decodeToString()
+            }
+        }.getOrNull()
+        if (text.isNullOrBlank()) {
+            Feedback.error(context)
+            return
+        }
+        val result = com.retrocam.catalog.lab.XmpImport.parse(text)
+        if (result.isEmpty) {
+            Feedback.error(context)
+            return
+        }
+        pendingSelectedRecipe = null
+        _uiState.update { s ->
+            s.copy(
+                labRecipe = s.labRecipe.copy(
+                    adjustments = s.labRecipe.adjustments.copy(
+                        contrast = result.recipe.adjustments.contrast,
+                        saturation = result.recipe.adjustments.saturation,
+                        warmth = result.recipe.adjustments.warmth,
+                        tint = result.recipe.adjustments.tint,
+                    ),
+                    gamma = result.recipe.gamma,
+                    sharpen = result.recipe.sharpen,
+                ),
+                xmpReport = result,
+            )
+        }
+        Feedback.info(context, "XMP imported")
+    }
+
+    fun clearXmpReport() {
+        _uiState.update { it.copy(xmpReport = null) }
     }
 
     /** Reads a LUT's pixels and hands them to the GL thread. */

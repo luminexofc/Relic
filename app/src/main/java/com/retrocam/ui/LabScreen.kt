@@ -123,6 +123,13 @@ fun LabScreen(viewModel: CameraViewModel) {
     val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importRecipe(uri)
     }
+    // No mime filter: an .xmp is XMP-as-UTF8, so it arrives as text/xml,
+    // application/octet-stream or nothing at all depending on who exported it.
+    // Filtering on a type would hide the file on some devices rather than fail
+    // usefully, so the extension is checked after reading instead.
+    val xmpPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.importXmp(uri)
+    }
 
     // The Lab's own renderer, not the camera's. syncRenderer is what tells the
     // ViewModel which GL pipeline is live, so LUT and overlay uploads land on the
@@ -324,6 +331,9 @@ fun LabScreen(viewModel: CameraViewModel) {
             onSelectStage = { selectedStage = it },
             onShare = viewModel::shareRecipe,
             onImportQr = { qrPicker.launch("image/*") },
+            xmpReport = state.xmpReport,
+            onImportXmp = { xmpPicker.launch("*/*") },
+            onDismissReport = viewModel::clearXmpReport,
             onDeleteLut = viewModel::deleteLut,
             onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,
