@@ -89,7 +89,19 @@ data class LabRecipe(
      * phone rather than just looking busy.
      */
     val stages: List<LabStage> = emptyList(),
+
+    /**
+     * Adobe's tone curve, as four 256-sample runs joined by `;`: composite, red,
+     * green, blue. A run is empty when that curve is absent, and [ToneCurve.NONE]
+     * when the preset had no curve at all.
+     *
+     * Stored sampled rather than as control points, because re-interpolating a
+     * sampled run bends a curve that was already exact.
+     */
+    val toneCurves: String = ToneCurve.NONE,
 ) {
+    /** True when at least one tone curve is present. */
+    val toneCurveActive: Boolean get() = toneCurves != ToneCurve.NONE
     /** The stage list after clamping, which is what the renderer and codec both use. */
     fun stagesClamped(): List<LabStage> = stages.take(MAX_STAGES).map {
         it.copy(amount = it.amountClamped, mask = it.maskClamped)
@@ -100,7 +112,8 @@ data class LabRecipe(
 
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
-        get() = templateId == null && adjustments.isNeutral && !hasEffects && stages.isEmpty()
+        get() = templateId == null && adjustments.isNeutral && !hasEffects &&
+            stages.isEmpty() && !toneCurveActive
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -120,6 +133,7 @@ data class LabRecipe(
         if (splitAmount > 0f) add("split tone")
         if (!stampText.isNullOrBlank()) add("date stamp")
         if (watermarkId != null) add("watermark")
+        if (toneCurveActive) add("tone curve")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -174,6 +188,7 @@ data class LabRecipe(
             shadowTint = r.shadowTint,
             highlightTint = r.highlightTint,
             stages = r.stagesClamped(),
+            toneCurves = r.toneCurves,
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

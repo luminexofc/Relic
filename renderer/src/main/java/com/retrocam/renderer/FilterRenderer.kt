@@ -81,6 +81,8 @@ class FilterRenderer(
         val uGScale: Int,
         val uBScale: Int,
         val uSaturation: Int,
+        val uCurve: Int,
+        val uCurveAmount: Int,
         val uGamma: Int,
         val uSplitAmount: Int,
         val uShadowTint: Int,
@@ -437,6 +439,23 @@ class FilterRenderer(
      * in the UI because they are GL objects and must be re-created after a
      * context loss, same as every other handle in this class.
      */
+    /**
+     * The tone curve texture handle, 0 when the recipe has none. One texture,
+     * not a map: there is only ever one curve set, and it is replaced rather
+     * than accumulated.
+     */
+    private var curveTexId = 0
+
+    /**
+     * The bytes currently on the GPU, so a re-upload only happens when the curve
+     * actually changed.
+     *
+     * Comparing a 1KB array once per frame is free, and it removes the need for
+     * a queue op and an invalidation counter that every mutation of the recipe
+     * would have to remember to bump. The alternative is a whole invalidation
+     * path for the sake of skipping a memcpy.
+     */
+    private var curveTexBytes: ByteArray? = null
     private val labLuts = LinkedHashMap<String, Int>()
     private val lutCubes = HashMap<String, Int>()
 
@@ -474,6 +493,36 @@ class FilterRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         labLuts[id] = tex[0]
         lutCubes[id] = cube
+    }
+
+    /**
+     * Uploads or replaces the 256x1 tone curve texture. Must run on the GL
+     * thread.
+     *
+     * LINEAR on the horizontal axis so a curve read at an arbitrary input value
+     * is interpolated rather than quantised to the nearest sample; CLAMP so a
+     * value outside 0..1 does not wrap.
+     */
+    fun uploadCurve(rgba: ByteArray) {
+        if (curveTexId != 0) GLES20.glDeleteTextures(1, intArrayOf(curveTexId), 0)
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = java.nio.ByteBuffer
+            .allocateDirect(rgba.size)
+            .order(java.nio.ByteOrder.nativeOrder())
+        buf.put(rgba)
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, 256, 1, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf,
+        )
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        curveTexId = tex[0]
+        curveTexBytes = rgba
     }
 
     fun hasLut(id: String): Boolean = labLuts.containsKey(id)
@@ -664,6 +713,8 @@ class FilterRenderer(
                 uGScale = GLES20.glGetUniformLocation(p, "u_gScale"),
                 uBScale = GLES20.glGetUniformLocation(p, "u_bScale"),
                 uSaturation = GLES20.glGetUniformLocation(p, "u_saturation"),
+                uCurve = GLES20.glGetUniformLocation(p, "u_curve"),
+                uCurveAmount = GLES20.glGetUniformLocation(p, "u_curveAmount"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
                 uSplitAmount = GLES20.glGetUniformLocation(p, "u_splitAmount"),
                 uShadowTint = GLES20.glGetUniformLocation(p, "u_shadowTint"),
@@ -1007,6 +1058,24 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uBScale, u.bScale)
             GLES20.glUniform1f(prog.uSaturation, u.saturation)
             GLES20.glUniform1f(prog.uGamma, u.gamma)
+        if (prog.uCurve != -1) {
+            GLES20.glUniform1f(prog.uCurveAmount, u.curveAmount)
+            val wanted = u.curveTex
+            if (wanted != null && !wanted.contentEquals(curveTexBytes)) {
+                uploadCurve(wanted)
+            }
+            if (u.curveAmount > 0f && curveTexId != 0) {
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE7)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, curveTexId)
+                GLES20.glUniform1i(prog.uCurve, 7)
+            } else {
+                // Amount zero already short-circuits the fetch, but leaving a
+                // stale sampler bound would sample whatever unit 7 last held.
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE7)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0)
+                GLES20.glUniform1i(prog.uCurve, 7)
+            }
+        }
             GLES20.glUniform1f(prog.uSplitAmount, u.splitAmount)
             GLES20.glUniform3f(prog.uShadowTint, u.shadowTint[0], u.shadowTint[1], u.shadowTint[2])
             GLES20.glUniform3f(prog.uHighlightTint, u.highlightTint[0], u.highlightTint[1], u.highlightTint[2])

@@ -83,6 +83,13 @@ object Shaders {
         uniform float u_bScale;       // warmth
         uniform float u_saturation;
 
+        // Adobe's 1D tone curve: a 256x1 texture holding four curves in its
+        // channels, R composite, G red, B green, A blue. Any channel the preset
+        // does not set is packed as the identity ramp, so all four are applied
+        // unconditionally and an absent curve costs nothing.
+        uniform sampler2D u_curve;
+        uniform float u_curveAmount;
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -998,6 +1005,21 @@ object Shaders {
             if (abs(u_saturation - 1.0) > 0.001) {
                 float lum = luminance(c);
                 c = mix(vec3(lum), c, u_saturation);
+            }
+
+            // --- 8. Tone Curve, then Look. Fourteen in Adobe's order, and the
+            // single largest thing an XMP preset carries.
+            // Three fetches cover all four curves: fetching at each input
+            // channel returns every curve evaluated at that input, so the
+            // composite for all three channels and each channel's own curve all
+            // come out of the same three reads.
+            if (u_curveAmount > 0.0) {
+                vec4 cr = texture2D(u_curve, vec2(c.r, 0.5));
+                vec4 cg = texture2D(u_curve, vec2(c.g, 0.5));
+                vec4 cb = texture2D(u_curve, vec2(c.b, 0.5));
+                // Composite first, matching Adobe, then each channel on top.
+                c = mix(c, vec3(cr.r, cg.r, cb.r), u_curveAmount);
+                c = mix(c, vec3(cr.g, cg.b, cb.a), u_curveAmount);
             }
 
             c = clamp(c, 0.0, 1.0);

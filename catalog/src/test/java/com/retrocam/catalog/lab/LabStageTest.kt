@@ -275,7 +275,7 @@ class LabStageTest {
     @Test
     fun `a recipe with no stages still encodes to the dash placeholder`() {
         val enc = RecipeCodec.encode(SavedRecipe.create("N", "original", LabRecipe()))
-        assertEquals("-", enc.split(",")[31])
+        assertEquals("-", enc.split(",")[32])
     }
 
     /**
@@ -294,7 +294,7 @@ class LabStageTest {
      * for the wrong reason.
      */
     private fun payload(stageField: String): String {
-        val f = MutableList(32) { "0" }
+        val f = MutableList(33) { "0" }
         f[0] = RecipeCodec.VERSION.toString()
         f[1] = java.util.Base64.getUrlEncoder().withoutPadding()
             .encodeToString("T".toByteArray())
@@ -308,6 +308,7 @@ class LabStageTest {
         f[23] = "-"   // stampText
         f[27] = "-"   // watermarkId
         f[31] = stageField
+        f[32] = "-"   // tone curve
         return f.joinToString(",")
     }
 

@@ -210,7 +210,7 @@ class XmpImportTest {
     fun `the range-specific keys are reported as dropped, not vanished`() {
         val res = XmpImport.parse(modern)
         val dropped = res.ignored.map { it.key }.toSet()
-        for (k in listOf("Highlights2012", "Shadows2012", "Whites2012", "Blacks2012", "Texture", "Clarity", "Dehaze", "Look", "ToneCurvePV2012", "GrainAmount")) {
+        for (k in listOf("Highlights2012", "Shadows2012", "Whites2012", "Blacks2012", "Texture", "Clarity", "Dehaze", "Look", "GrainAmount")) {
             assertTrue("$k was dropped without being reported", k in dropped)
         }
         // Every drop has to say why, or the report is just a list of absences.
@@ -218,10 +218,57 @@ class XmpImportTest {
     }
 
     @Test
-    fun `look and the tone curve are called out by name because they are the bulk of a preset`() {
+    fun `look is still dropped and says why`() {
         val res = XmpImport.parse(modern)
-        assertNotNull(res.ignored.firstOrNull { it.key == "Look" })
-        assertTrue(res.ignored.first { it.key == "ToneCurvePV2012" }.reason.contains("curve"))
+        val look = res.ignored.first { it.key == "Look" }
+        assertTrue(look.reason.contains("no honest mapping"))
+    }
+
+    /** The tone curve is the biggest thing a preset carries, so it must land. */
+    @Test
+    fun `the tone curve is imported rather than dropped`() {
+        val res = XmpImport.parse(modern)
+        assertTrue(res.recipe.toneCurveActive)
+        assertTrue(res.applied.any { it.key == "ToneCurvePV2012" })
+        assertTrue(res.ignored.none { it.key == "ToneCurvePV2012" })
+        val g = ToneCurve.parseGroup(res.recipe.toneCurves)
+        assertNotNull(g[0])
+        // 128,132: a lift of the midtones.
+        assertEquals(132 / 255f, g[0]!![128], 1e-3f)
+    }
+
+    @Test
+    fun `per-channel curves land in their own slots`() {
+        val res = XmpImport.parse(
+            "crs:ToneCurvePV2012Red=\"0, 0, 255, 255, 128, 200\" " +
+                "crs:ToneCurvePV2012Blue=\"0, 0, 255, 255, 128, 60\"",
+        )
+        val g = ToneCurve.parseGroup(res.recipe.toneCurves)
+        assertNull(g[0]); assertNotNull(g[1]); assertNull(g[2]); assertNotNull(g[3])
+        assertEquals(200 / 255f, g[1]!![128], 1e-3f)
+        assertEquals(60 / 255f, g[3]!![128], 1e-3f)
+    }
+
+    @Test
+    fun `an unreadable curve is reported as unreadable, not as identity`() {
+        val res = XmpImport.parse("""crs:ToneCurvePV2012="nonsense"""")
+        assertTrue(!res.recipe.toneCurveActive)
+        assertTrue(res.ignored.any { it.key == "ToneCurvePV2012" && it.reason.contains("unreadable") })
+    }
+
+    @Test
+    fun `a preset with no curve leaves the recipe inactive`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
+        assertTrue(!r.toneCurveActive)
+        assertEquals(ToneCurve.NONE, r.toneCurves)
+    }
+
+    /** Nonsense in one curve must not take the rest of the import with it. */
+    @Test
+    fun `one bad curve does not discard the rest of the preset`() {
+        val res = XmpImport.parse("""crs:ToneCurvePV2012Red="junk" crs:Contrast2012="+10"""")
+        assertEquals(1.1f, res.recipe.adjustments.contrast, 1e-3f)
+        assertTrue(res.applied.any { it.key == "Contrast2012" })
     }
 
     @Test

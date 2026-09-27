@@ -33,7 +33,7 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "6",
+        version: String = "7",
         name: String = "X",
         base: String = "original",
         template: String = "-",
@@ -45,8 +45,9 @@ class RecipeCodecTest {
         stamp: List<String> = listOf("-", "0", "4", "1", "-", "0", "4"),
         reserved: String = "0",
         stages: String = "-",
+        curves: String = "-",
     ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut +
-        colour + stamp + reserved + stages)
+        colour + stamp + reserved + stages + curves)
         .joinToString(",")
 
     @Test
@@ -61,7 +62,7 @@ class RecipeCodecTest {
         // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(32, enc.split(',').size, "bad field count in '$enc'")
+        assertEquals(33, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
     }
 

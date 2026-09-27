@@ -190,6 +190,30 @@ object XmpImport {
             }
         }
 
+        // ---- tone curve: the single largest thing a preset carries ----
+        // Composite plus per-channel, packed into one recipe field. Look is
+        // still dropped: it names one of Adobe's proprietary curve sets, and
+        // inventing a substitute would be guessing at someone's look.
+        val curveKeys = listOf(
+            "ToneCurvePV2012" to 0,
+            "ToneCurvePV2012Red" to 1,
+            "ToneCurvePV2012Green" to 2,
+            "ToneCurvePV2012Blue" to 3,
+        )
+        val curves = arrayOfNulls<FloatArray>(4)
+        var anyCurve = false
+        for ((key, slot) in curveKeys) {
+            val v = a[key] ?: continue
+            val c = ToneCurve.parse(v)
+            if (c == null) {
+                ignored += XmpIgnored(key, v, "unreadable: not a list of (x, y) points")
+                continue
+            }
+            curves[slot] = c
+            anyCurve = true
+            add(key, v.take(24) + if (v.length > 24) "..." else "", "TONE CURVE", approx = true)
+        }
+
         // ---- everything else, reported rather than silently dropped ----
         for (k in listOf("Highlights2012", "Highlights")) drop(k, "range-specific, no knob")
         for (k in listOf("Whites2012", "Whites")) drop(k, "range-specific, no knob")
@@ -199,10 +223,7 @@ object XmpImport {
         for (k in listOf("GrainAmount", "PostCropVignetteAmount")) {
             drop(k, "units differ, no honest mapping")
         }
-        for (k in listOf("ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue")) {
-            drop(k, "per-channel curve, no curve texture")
-        }
-        drop("ToneCurvePV2012", "needs a curve texture, not a knob")
+
         drop("ToneCurveName", "a named curve set, not a value")
         drop("Look", "an enum naming a curve set; no honest mapping")
 
@@ -226,6 +247,7 @@ object XmpImport {
                 ),
                 gamma = gamma,
                 sharpen = sharpen,
+                toneCurves = if (anyCurve) ToneCurve.encodeGroup(curves.toList()) else ToneCurve.NONE,
             ),
             applied = applied,
             ignored = ignored,
