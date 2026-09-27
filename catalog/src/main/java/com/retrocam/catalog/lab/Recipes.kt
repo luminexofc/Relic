@@ -103,7 +103,10 @@ data class SavedRecipe(
             append(RecipeCodec.q(lab.highlights)).append(',')
             append(RecipeCodec.q(lab.shadows)).append(',')
             append(RecipeCodec.q(lab.whites)).append(',')
-            append(lab.blacks).append('|')
+            append(lab.blacks).append(',')
+            append(RecipeCodec.q(lab.texture)).append(',')
+            append(RecipeCodec.q(lab.clarity)).append(',')
+            append(lab.dehaze).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -145,10 +148,10 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 8
+    const val VERSION = 9
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 37
+    private const val FIELD_COUNT = 40
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -182,6 +185,7 @@ object RecipeCodec {
             // for payload size and it should not push the fixed fields around.
             lab.toneCurves,
             q(lab.highlights), q(lab.shadows), q(lab.whites), q(lab.blacks),
+            q(lab.texture), q(lab.clarity), q(lab.dehaze),
         ).joinToString(SEP)
     }
 
@@ -312,6 +316,9 @@ object RecipeCodec {
                     shadows = parts[34].toFloat(),
                     whites = parts[35].toFloat(),
                     blacks = parts[36].toFloat(),
+                    texture = parts[37].toFloat(),
+                    clarity = parts[38].toFloat(),
+                    dehaze = parts[39].toFloat(),
                 ),
             )
             SavedRecipe(

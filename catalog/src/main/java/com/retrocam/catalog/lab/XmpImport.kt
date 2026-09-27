@@ -230,9 +230,18 @@ object XmpImport {
             add(key, q(v), "${legacyKey.uppercase()} = ${q(m)}")
         }
 
+        // ---- local contrast: Texture, Clarity, Dehaze, all -100..100 ----
+        val local = arrayOfNulls<Float>(3)
+        listOf("Texture" to 0, "Clarity" to 1, "Dehaze" to 2).forEach { (key, slot) ->
+            val v = num(a[key]) ?: return@forEach
+            if (v == 0f) return@forEach
+            val m = (v / 100f).coerceIn(-1f, 1f)
+            local[slot] = m
+            add(key, q(v), "${key.uppercase()} = ${q(m)}")
+        }
+
         // ---- everything else, reported rather than silently dropped ----
         for (k in listOf("AutoBrightness", "Auto Tone")) drop(k, "needs a scene analysis")
-        for (k in listOf("Texture", "Clarity", "Dehaze")) drop(k, "local contrast, no analogue")
         for (k in listOf("GrainAmount", "PostCropVignetteAmount")) {
             drop(k, "units differ, no honest mapping")
         }
@@ -265,6 +274,9 @@ object XmpImport {
                 shadows = ranges[1] ?: 0f,
                 whites = ranges[2] ?: 0f,
                 blacks = ranges[3] ?: 0f,
+                texture = local[0] ?: 0f,
+                clarity = local[1] ?: 0f,
+                dehaze = local[2] ?: 0f,
             ),
             applied = applied,
             ignored = ignored,

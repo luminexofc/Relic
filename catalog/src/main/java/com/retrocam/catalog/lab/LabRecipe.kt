@@ -106,7 +106,23 @@ data class LabRecipe(
     val shadows: Float = 0f,
     val whites: Float = 0f,
     val blacks: Float = 0f,
+
+    // Adobe's local-contrast trio, -1..1.
+    //
+    // Clarity and Dehaze share a blur radius; Adobe gives them separate ones.
+    // A second 9-tap pass on the live viewfinder is 9 more texture fetches per
+    // pixel per frame, which is not worth the difference, and a preset's
+    // texture/clarity balance still lands because the amount differs.
+    val texture: Float = 0f,
+    val clarity: Float = 0f,
+    val dehaze: Float = 0f,
 ) {
+    /** True when any local-contrast control is off neutral. */
+    val localActive: Boolean
+        get() = texture != 0f || clarity != 0f || dehaze != 0f
+
+    /** `[texture, clarity, dehaze]`. */
+    fun localArray(): FloatArray = floatArrayOf(texture, clarity, dehaze)
     /** True when any of the four range controls is off neutral. */
     val rangesActive: Boolean
         get() = highlights != 0f || shadows != 0f || whites != 0f || blacks != 0f
@@ -126,7 +142,7 @@ data class LabRecipe(
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
         get() = templateId == null && adjustments.isNeutral && !hasEffects &&
-            stages.isEmpty() && !toneCurveActive && !rangesActive
+            stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -151,6 +167,9 @@ data class LabRecipe(
         if (shadows != 0f) add("shadows")
         if (whites != 0f) add("whites")
         if (blacks != 0f) add("blacks")
+        if (texture != 0f) add("texture")
+        if (clarity != 0f) add("clarity")
+        if (dehaze != 0f) add("dehaze")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -210,6 +229,9 @@ data class LabRecipe(
             shadows = r.shadows.coerceIn(-1f, 1f),
             whites = r.whites.coerceIn(-1f, 1f),
             blacks = r.blacks.coerceIn(-1f, 1f),
+            texture = r.texture.coerceIn(-1f, 1f),
+            clarity = r.clarity.coerceIn(-1f, 1f),
+            dehaze = r.dehaze.coerceIn(-1f, 1f),
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

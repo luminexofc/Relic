@@ -210,11 +210,36 @@ class XmpImportTest {
     fun `the keys with no Lab equivalent are reported, not vanished`() {
         val res = XmpImport.parse(modern)
         val dropped = res.ignored.map { it.key }.toSet()
-        for (k in listOf("Texture", "Clarity", "Dehaze", "Look", "GrainAmount")) {
+        for (k in listOf("Look", "GrainAmount")) {
             assertTrue("$k was dropped without being reported", k in dropped)
         }
+        assertTrue("the report should still name the keys it did handle",
+            res.applied.map { it.key }.containsAll(
+                listOf("Texture", "Clarity", "Dehaze", "Highlights2012", "Shadows2012")))
         // Every drop has to say why, or the report is just a list of absences.
         assertTrue(res.ignored.all { it.reason.isNotBlank() })
+    }
+
+    /** Local contrast used to be reported as having no analogue. */
+    @Test
+    fun `texture clarity and dehaze are applied not dropped`() {
+        val r = XmpImport.parse(modern).recipe
+        assertEquals(15 / 100f, r.texture, 1e-3f)
+        assertEquals(5 / 100f, r.clarity, 1e-3f)
+        assertEquals(3 / 100f, r.dehaze, 1e-3f)
+        assertTrue(r.localActive)
+        val res = XmpImport.parse(modern)
+        for (k in listOf("Texture", "Clarity", "Dehaze")) {
+            assertTrue("$k should be applied", res.applied.any { it.key == k })
+            assertTrue("$k should not be dropped", res.ignored.none { it.key == k })
+        }
+    }
+
+    @Test
+    fun `local contrast values are clamped`() {
+        val r = XmpImport.parse("""crs:Texture="+9000" crs:Clarity="-9000"""").recipe
+        assertTrue(r.texture in -1f..1f)
+        assertTrue(r.clarity in -1f..1f)
     }
 
     /** The four range controls used to be the biggest thing we threw away. */

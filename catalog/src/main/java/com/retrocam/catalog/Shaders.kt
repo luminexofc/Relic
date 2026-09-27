@@ -93,6 +93,9 @@ object Shaders {
         /** Highlights, Shadows, Whites, Blacks, each -1..1. */
         uniform vec4 u_ranges;
 
+        /** Texture, Clarity, Dehaze, each -1..1. */
+        uniform vec3 u_local;
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -186,6 +189,20 @@ object Shaders {
             ditherCoord = floor(px / blockCell);
             return sampleSrc(centerPx / u_resolution).rgb;
         }
+        // A 9-tap tent at spacing [s], the same weights the blur effect uses.
+        vec3 tent3(vec3 c, vec2 s) {
+            vec3 sum = c * 4.0;
+            sum += sampleSrc(vFrameCoord + vec2(-s.x, -s.y)).rgb;
+            sum += sampleSrc(vFrameCoord + vec2( 0.0, -s.y)).rgb * 2.0;
+            sum += sampleSrc(vFrameCoord + vec2( s.x, -s.y)).rgb;
+            sum += sampleSrc(vFrameCoord + vec2(-s.x,  0.0)).rgb * 2.0;
+            sum += sampleSrc(vFrameCoord + vec2( s.x,  0.0)).rgb * 2.0;
+            sum += sampleSrc(vFrameCoord + vec2(-s.x,  s.y)).rgb;
+            sum += sampleSrc(vFrameCoord + vec2( 0.0,  s.y)).rgb * 2.0;
+            sum += sampleSrc(vFrameCoord + vec2( s.x,  s.y)).rgb;
+            return sum / 16.0;
+        }
+
         // The same smoothstep the Kotlin RangeTone.smooth01 implements.
         float smooth01(float x) {
             float t = clamp(x, 0.0, 1.0);
@@ -1033,8 +1050,40 @@ object Shaders {
                 }
             }
 
-            // --- 5. Texture / Clarity / Dehaze land here (phase 4). Adobe
-            // applies local contrast BEFORE the tone curve, not after. ---
+            // --- 5. Texture, Clarity, Dehaze. Adobe applies local contrast
+            // BEFORE the tone curve, not after, so a preset's curve shapes the
+            // tones and only then finds the local structure in them.
+            //
+            // This is structurally what Adobe's operators are: a difference
+            // against a blur, added back. One 9-tap tent is shared, so clarity
+            // and dehaze have the same radius rather than their own - see the
+            // note in the recipe about that ceiling.
+            if (u_local.x != 0.0 || u_local.y != 0.0 || u_local.z != 0.0) {
+                // Texture: fine detail, added equally to all three channels so
+                // it sharpens without shifting hue.
+                if (u_local.x != 0.0) {
+                    float l0 = luminance(c);
+                    float ld = luminance(tent3(c, texel * 1.5));
+                    c += u_local.x * (l0 - ld);
+                }
+                if (u_local.y != 0.0 || u_local.z != 0.0) {
+                    // ponytail: clarity and dehaze share one radius. Separate
+                    // radii would need a second 9-tap pass on the live
+                    // viewfinder, which is 9 more fetches per pixel per frame.
+                    vec3 wide = tent3(c, texel * 6.0);
+                    if (u_local.y != 0.0) {
+                        // Per channel, which is what gives clarity its
+                        // characteristic colour shift in skin and foliage.
+                        c += u_local.y * (c - wide);
+                    }
+                    if (u_local.z != 0.0) {
+                        c += u_local.z * (c - wide);
+                        // Dehaze also deepens, so it raises contrast rather
+                        // than only adding local structure.
+                        c = (c - 0.5) * (1.0 + u_local.z * 0.4) + 0.5;
+                    }
+                }
+            }
 
             // --- 6. Temp and Tint: three diagonal scales, no offset ---
             c *= vec3(u_rScale, u_gScale, u_bScale);

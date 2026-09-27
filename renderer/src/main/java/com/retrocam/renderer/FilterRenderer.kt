@@ -82,6 +82,7 @@ class FilterRenderer(
         val uBScale: Int,
         val uSaturation: Int,
         val uRanges: Int,
+        val uLocal: Int,
         val uCurve: Int,
         val uCurveAmount: Int,
         val uGamma: Int,
@@ -715,6 +716,7 @@ class FilterRenderer(
                 uBScale = GLES20.glGetUniformLocation(p, "u_bScale"),
                 uSaturation = GLES20.glGetUniformLocation(p, "u_saturation"),
                 uRanges = GLES20.glGetUniformLocation(p, "u_ranges"),
+                uLocal = GLES20.glGetUniformLocation(p, "u_local"),
                 uCurve = GLES20.glGetUniformLocation(p, "u_curve"),
                 uCurveAmount = GLES20.glGetUniformLocation(p, "u_curveAmount"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
@@ -1061,6 +1063,8 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uSaturation, u.saturation)
             val r = u.ranges
             GLES20.glUniform4f(prog.uRanges, r[0], r[1], r[2], r[3])
+            val l = u.local
+            GLES20.glUniform3f(prog.uLocal, l[0], l[1], l[2])
             GLES20.glUniform1f(prog.uGamma, u.gamma)
         if (prog.uCurve != -1) {
             GLES20.glUniform1f(prog.uCurveAmount, u.curveAmount)
