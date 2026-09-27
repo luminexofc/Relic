@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
@@ -305,8 +306,14 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
         renderer.theme = if (state.paperTheme) 1f else 0f
     }
     // Filtered preview toggle: bypass renders Original through the same pipeline.
-    LaunchedEffect(state.filter, state.intensity, state.sizeScale, state.detailScale, state.filterPreview) {
-        renderer.setSpec(viewModel.effectiveSpec(), state.intensity)
+    // labRecipe/labOpen are keys too: while the Lab is open the preview shows the
+    // draft being edited, and each knob move is a new immutable LabRecipe, so this
+    // is what pushes the new grade into the renderer.
+    LaunchedEffect(
+        state.filter, state.intensity, state.sizeScale, state.detailScale,
+        state.filterPreview, state.labOpen, state.labRecipe, state.labBaseId, state.labIntensity,
+    ) {
+        renderer.setSpec(viewModel.effectiveSpec(), viewModel.effectiveIntensity())
     }
     LaunchedEffect(state.filter) {
         val specs = state.specs
@@ -357,26 +364,30 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     val aspectRatio = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TopBar(
-            rotation = orientAngle,
-            showMirror = state.frontCamera,
-            mirrorOn = state.mirrorFront,
-            onMirror = viewModel::toggleMirror,
-            onSettings = { viewModel.setSettingsOpen(true) },
-        )
-        QuickBar(
-            rotation = orientAngle,
-            aspectBadge = ASPECT_LABELS[state.viewAspect.coerceIn(0, ASPECT_LABELS.lastIndex)],
-            timerBadge = state.timerSeconds.takeIf { it > 0 }?.let { "${it}s" },
-            gridOn = state.gridOn,
-            flashOn = state.flashOn,
-            onAspect = viewModel::cycleAspect,
-            onAspectLong = { optionSheet = "aspect" },
-            onTimer = viewModel::cycleTimer,
-            onTimerLong = { optionSheet = "timer" },
-            onGrid = { viewModel.setGrid(!state.gridOn) },
-            onFlash = viewModel::toggleFlash,
-        )
+        // The Lab keeps the viewfinder but drops the camera chrome: the grade is
+        // edited below the finder, not behind a full-screen panel.
+        if (!state.labOpen) {
+            TopBar(
+                rotation = orientAngle,
+                showMirror = state.frontCamera,
+                mirrorOn = state.mirrorFront,
+                onMirror = viewModel::toggleMirror,
+                onSettings = { viewModel.setSettingsOpen(true) },
+            )
+            QuickBar(
+                rotation = orientAngle,
+                aspectBadge = ASPECT_LABELS[state.viewAspect.coerceIn(0, ASPECT_LABELS.lastIndex)],
+                timerBadge = state.timerSeconds.takeIf { it > 0 }?.let { "${it}s" },
+                gridOn = state.gridOn,
+                flashOn = state.flashOn,
+                onAspect = viewModel::cycleAspect,
+                onAspectLong = { optionSheet = "aspect" },
+                onTimer = viewModel::cycleTimer,
+                onTimerLong = { optionSheet = "timer" },
+                onGrid = { viewModel.setGrid(!state.gridOn) },
+                onFlash = viewModel::toggleFlash,
+            )
+        }
 
         BoxWithConstraints(
             Modifier
@@ -549,10 +560,32 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             }
         }
 
-        FilterHandleBar(
-                filterName = state.filter.displayName,
-                onOpen = { showFilters = true },
+        if (state.labOpen) {
+            BackHandler { viewModel.closeLab() }
+            FilterLabPanel(
+                tab = state.labTab,
+                name = state.labName,
+                recipe = state.labRecipe,
+                intensity = state.labIntensity,
+                saved = state.labRecipes,
+                canSave = viewModel.canSaveLab(),
+                onTab = viewModel::setLabTab,
+                onName = viewModel::setLabName,
+                onTemplate = viewModel::setLabTemplate,
+                onKnob = viewModel::setLabKnob,
+                onResetKnob = viewModel::resetLabKnob,
+                onResetAll = viewModel::resetLabKnobs,
+                onIntensity = viewModel::setLabIntensity,
+                onSave = viewModel::saveLab,
+                onEdit = viewModel::editLabRecipe,
+                onDelete = viewModel::deleteLabRecipe,
+                onClose = viewModel::closeLab,
             )
+        } else {
+            FilterHandleBar(
+                    filterName = state.filter.displayName,
+                    onOpen = { showFilters = true },
+                )
 
         ModeRow(mode = state.mode, onMode = viewModel::setMode)
 
@@ -626,6 +659,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                     }
                 }
             }
+            }
         }
     }
 
@@ -646,6 +680,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             onSelect = viewModel::selectFilter,
             onToggleFavorite = viewModel::toggleFavorite,
             onHintShown = viewModel::markStripHintSeen,
+            onOpenLab = { viewModel.openLab() },
             onDismiss = { showFilters = false },
         )
     }
@@ -942,6 +977,7 @@ private fun FilterDrawer(
     onSelect: (com.retrocam.catalog.FilterSpec) -> Unit,
     onToggleFavorite: (com.retrocam.catalog.FilterSpec) -> Unit,
     onHintShown: () -> Unit,
+    onOpenLab: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -995,6 +1031,36 @@ private fun FilterDrawer(
                     text = "swipe filters · long-press ★ to pin",
                     fontFamily = RetroType.Mono,
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            // Entry point for building your own filter. Sits above the strip so
+            // it reads as "make one" rather than another entry in the list.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 6.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .clickable {
+                        onDismiss()
+                        onOpenLab()
+                    }
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Science,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "FILTER LAB · MAKE YOUR OWN",
+                    fontFamily = RetroType.Mono,
+                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }

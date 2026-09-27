@@ -64,6 +64,18 @@ data class CameraUiState(
     /** Bake a polaroid card into saved photos. */
     val photoCard: Boolean = false,
     val settingsOpen: Boolean = false,
+    // ---- Filter Lab ----
+    val labOpen: Boolean = false,
+    /** 0 = Basic (template + intensity), 1 = Advanced (the five knobs). */
+    val labTab: Int = 0,
+    val labName: String = "",
+    /** The grade being edited. Immutable, so identity drives renderer updates. */
+    val labRecipe: com.retrocam.catalog.lab.LabRecipe = com.retrocam.catalog.lab.LabRecipe(),
+    /** Catalog id the draft layers on top of. */
+    val labBaseId: String = "original",
+    val labIntensity: Float = 1f,
+    /** Saved recipes, newest last. Recipes whose base filter is gone are dropped. */
+    val labRecipes: List<com.retrocam.catalog.lab.SavedRecipe> = emptyList(),
     val zoomRatio: Float = 1f,
     val mode: String = "photo",
     val recording: Boolean = false,
@@ -131,6 +143,7 @@ class CameraViewModel @Inject constructor(
                 settings.saveDir,
                 settings.mirrorFront,
                 settings.photoCard,
+                settings.customRecipes,
             ) { args ->
                 @Suppress("UNCHECKED_CAST")
                 val fav = args[0] as Set<String>
@@ -144,11 +157,18 @@ class CameraViewModel @Inject constructor(
                 val folder = args[8] as String
                 val mirror = args[9] as Boolean
                 val card = args[10] as Boolean
-                FullState(fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card)
-            }.collect { (fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card) ->
+                // Unparseable entries are dropped, and so are recipes whose base
+                // filter has been removed: a shared recipe pointing at a filter we
+                // no longer ship has nothing to render.
+                val recipes = (args[11] as List<String>)
+                    .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
+                    .filter { it.toSpec() != null }
+                FullState(fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes)
+            }.collect { (fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes) ->
                 _uiState.update {
                     it.copy(
-                        specs = orderSpecs(fav),
+                        specs = orderSpecs(fav, recipes),
+                        labRecipes = recipes,
                         favorites = fav,
                         gridOn = grid,
                         soundOn = sound,
@@ -290,11 +310,159 @@ class CameraViewModel @Inject constructor(
 
     /** What the preview pipeline should render (bypass Original when toggled off). */
     fun effectiveSpec(): FilterSpec {
-        val base = if (_uiState.value.filterPreview) _uiState.value.filter else FilterCatalog.byId.getValue("original")
+        val s = _uiState.value
+        // While the Lab is open the draft is what the finder shows, so the grade
+        // is live rather than something you only see after saving.
+        if (s.labOpen) {
+            val base = FilterCatalog.byId[s.labBaseId] ?: FilterCatalog.default
+            return base.copy(lab = s.labRecipe)
+        }
+        val base = if (s.filterPreview) s.filter else FilterCatalog.byId.getValue("original")
         var effective = base
-        if (base.param1 > 0f) effective = effective.copy(param1 = base.param1 * _uiState.value.sizeScale)
-        if (base.param2 > 0f) effective = effective.copy(param2 = base.param2 * _uiState.value.detailScale)
+        if (base.param1 > 0f) effective = effective.copy(param1 = base.param1 * s.sizeScale)
+        if (base.param2 > 0f) effective = effective.copy(param2 = base.param2 * s.detailScale)
         return effective
+    }
+
+    /** Intensity for the live preview: the Lab's own slider while it is open. */
+    fun effectiveIntensity(): Float =
+        if (_uiState.value.labOpen) _uiState.value.labIntensity else _uiState.value.intensity
+
+    // ---- Filter Lab ----
+
+    /**
+     * Opens the Lab. The draft starts as a copy of whatever is selected, so
+     * "adjust the filter I am already using" is the default path rather than
+     * something you have to set up.
+     */
+    fun openLab() {
+        val s = _uiState.value
+        val editing = s.labRecipes.firstOrNull { it.id == s.filter.id }
+        _uiState.update {
+            if (editing != null) {
+                it.copy(
+                    labOpen = true, labTab = 0, labName = editing.name,
+                    labBaseId = editing.baseId, labRecipe = editing.lab,
+                    labIntensity = s.intensity,
+                )
+            } else {
+                it.copy(
+                    labOpen = true, labTab = 0,
+                    labName = if (s.filter.id.startsWith("lab_")) s.filter.displayName else "",
+                    labBaseId = s.filter.id,
+                    labRecipe = s.filter.lab ?: com.retrocam.catalog.lab.LabRecipe(),
+                    labIntensity = s.intensity,
+                )
+            }
+        }
+    }
+
+    fun closeLab() {
+        _uiState.update { it.copy(labOpen = false) }
+    }
+
+    fun setLabTab(tab: Int) {
+        _uiState.update { it.copy(labTab = tab) }
+    }
+
+    fun setLabName(name: String) {
+        _uiState.update { it.copy(labName = name.take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)) }
+    }
+
+    fun setLabIntensity(value: Float) {
+        _uiState.update { it.copy(labIntensity = value.coerceIn(0f, 1f)) }
+    }
+
+    fun setLabTemplate(templateId: String?) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(templateId = templateId)) }
+    }
+
+    fun setLabBase(baseId: String) {
+        if (FilterCatalog.byId.containsKey(baseId)) {
+            _uiState.update { it.copy(labBaseId = baseId) }
+        }
+    }
+
+    /** Updates one grading knob. [which] indexes [com.retrocam.catalog.lab.Knob.RANGES]. */
+    fun setLabKnob(which: Int, value: Float) {
+        _uiState.update { s ->
+            val knobs = com.retrocam.catalog.lab.LabAdjustments.RANGES
+            val k = knobs.getOrNull(which) ?: return@update s
+            val a = s.labRecipe.adjustments
+            val next = when (which) {
+                0 -> a.copy(brightness = value.coerceIn(k.min, k.max))
+                1 -> a.copy(contrast = value.coerceIn(k.min, k.max))
+                2 -> a.copy(saturation = value.coerceIn(k.min, k.max))
+                3 -> a.copy(warmth = value.coerceIn(k.min, k.max))
+                4 -> a.copy(tint = value.coerceIn(k.min, k.max))
+                else -> a
+            }
+            s.copy(labRecipe = s.labRecipe.copy(adjustments = next))
+        }
+    }
+
+    fun resetLabKnobs() {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(adjustments = com.retrocam.catalog.lab.LabAdjustments.NEUTRAL)) }
+    }
+
+    /** True when there is anything worth saving. */
+    fun canSaveLab(): Boolean = !_uiState.value.labRecipe.isIdentity
+
+    /**
+     * Saves the draft, selects it, and closes the Lab. The selection matters:
+     * otherwise the finder would snap back to the old filter the moment the Lab
+     * closed, which reads as "my filter didn't save".
+     */
+    fun saveLab() {
+        val s = _uiState.value
+        if (s.labRecipe.isIdentity) return
+        val saved = com.retrocam.catalog.lab.SavedRecipe.create(
+            name = s.labName.ifBlank { s.labBaseId.uppercase() },
+            baseId = s.labBaseId,
+            lab = s.labRecipe,
+        )
+        val spec = saved.toSpec() ?: return
+        viewModelScope.launch {
+            val merged = (settings.customRecipes.first().mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
+                .filter { it.id != saved.id }) + saved
+            settings.setCustomRecipes(merged.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
+            settings.setIntensity(saved.id, s.labIntensity)
+            _uiState.update {
+                it.copy(
+                    labOpen = false,
+                    filter = spec,
+                    intensity = s.labIntensity,
+                    sizeScale = 1f,
+                    detailScale = 1f,
+                )
+            }
+        }
+    }
+
+    fun deleteLabRecipe(id: String) {
+        viewModelScope.launch {
+            val kept = settings.customRecipes.first()
+                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
+                .filter { it.id != id }
+            settings.setCustomRecipes(kept.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
+        }
+    }
+
+    /** Loads a saved recipe back into the draft for editing. */
+    fun editLabRecipe(id: String) {
+        val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
+        _uiState.update {
+            it.copy(
+                labOpen = true, labTab = 1, labName = r.name,
+                labBaseId = r.baseId, labRecipe = r.lab,
+            )
+        }
+    }
+
+    /** Resets a knob to its neutral point. */
+    fun resetLabKnob(which: Int) {
+        val k = com.retrocam.catalog.lab.LabAdjustments.RANGES.getOrNull(which) ?: return
+        setLabKnob(which, k.neutral)
     }
 
     /** Toggles the front-camera selfie mirror (preview + capture). */
@@ -594,6 +762,7 @@ class CameraViewModel @Inject constructor(
         val folder: String,
         val mirror: Boolean,
         val card: Boolean,
+        val recipes: List<com.retrocam.catalog.lab.SavedRecipe>,
     )
 
     companion object {
@@ -608,6 +777,22 @@ class CameraViewModel @Inject constructor(
             val rest = all - original.toSet()
             val favored = rest.filter { it.id in fav }
             return original + favored + (rest - favored.toSet())
+        }
+
+        /**
+         * Built-in strip order, then the user's own recipes at the end.
+         *
+         * Recipes are appended rather than interleaved so the 41 built-ins keep
+         * the positions muscle memory has already learned, and so a long list of
+         * custom filters never pushes a favourite out of reach.
+         */
+        private fun orderSpecs(
+            fav: Set<String>,
+            recipes: List<com.retrocam.catalog.lab.SavedRecipe>,
+        ): List<FilterSpec> {
+            val base = orderSpecs(fav)
+            val custom = recipes.mapNotNull { it.toSpec() }
+            return if (custom.isEmpty()) base else base + custom
         }
     }
 }

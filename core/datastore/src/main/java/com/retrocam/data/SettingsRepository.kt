@@ -140,6 +140,24 @@ class SettingsRepository @Inject constructor(
         store.edit { it[floatPreferencesKey("detail_$filterId")] = value }
     }
 
+    /**
+     * Saved Filter Lab recipes as opaque encoded strings, newest last.
+     *
+     * Deliberately untyped: this module must not depend on :catalog, and the
+     * recipe codec belongs there. Callers in :app decode with
+     * `RecipeCodec`, merge and re-encode, so the QR path and the stored path
+     * are the same format by construction rather than by convention.
+     */
+    val customRecipes: Flow<List<String>> = store.data.map { prefs ->
+        (prefs[Keys.CUSTOM_RECIPES] ?: "")
+            .split('\n')
+            .filter { it.isNotBlank() }
+    }
+
+    suspend fun setCustomRecipes(encoded: List<String>) {
+        store.edit { it[Keys.CUSTOM_RECIPES] = encoded.joinToString("\n") }
+    }
+
     private object Keys {
         val SOUND = booleanPreferencesKey("sound_enabled")
         val GRID = booleanPreferencesKey("grid_overlay")
@@ -155,6 +173,7 @@ class SettingsRepository @Inject constructor(
         val DIR = stringPreferencesKey("save_dir")
         val MIRROR = booleanPreferencesKey("mirror_front")
         val CARD = booleanPreferencesKey("photo_card")
+        val CUSTOM_RECIPES = stringPreferencesKey("custom_recipes")
     }
 
     companion object {
