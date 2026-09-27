@@ -199,6 +199,15 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
         return
     }
 
+    // The Lab is a separate screen with its own renderer and its own viewfinder.
+    // Branching here means the camera's GLSurfaceView, reticle, shutter and
+    // controls are never composed while it is up, and the camera binding follows
+    // whichever surface is alive.
+    if (state.mode == CameraViewModel.MODE_LAB) {
+        LabScreen(viewModel = viewModel)
+        return
+    }
+
     var viewPx by remember { mutableStateOf(IntSize.Zero) }
     var reticleAt by remember { mutableStateOf<Offset?>(null) }
     var reticleKey by remember { mutableStateOf(0) }
@@ -312,21 +321,30 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             viewModel.syncRenderer(renderer)
         }
     }
-    LaunchedEffect(state.frontCamera, state.mirrorFront) {
+    // mode is a key: coming back from the Lab, neither frontCamera nor
+    // mirrorFront has changed, so without this the ViewModel would keep pointing
+    // glRenderer at the Lab's (now released) pipeline and LUT/overlay uploads
+    // would land nowhere.
+    LaunchedEffect(state.frontCamera, state.mirrorFront, state.mode) {
         viewModel.syncRenderer(renderer)
+    }
+
+    // The Lab owns the camera while it is up, so the camera's GL context, its
+    // ~45 programs and its textures have to go. `remember` keeps this renderer
+    // alive across the mode switch, so it would otherwise leak on every visit;
+    // onSurfaceCreated reinitialises it when the viewfinder comes back.
+    DisposableEffect(renderer, state.mode) {
+        if (state.mode == CameraViewModel.MODE_LAB) renderer.release()
+        onDispose { }
     }
     LaunchedEffect(state.paperTheme) {
         renderer.theme = if (state.paperTheme) 1f else 0f
     }
     // Filtered preview toggle: bypass renders Original through the same pipeline.
-    // labRecipe/labOpen are keys too: while the Lab is open the preview shows the
-    // draft being edited, and each knob move is a new immutable LabRecipe, so this
-    // is what pushes the new grade into the renderer.
     LaunchedEffect(
-        state.filter, state.intensity, state.sizeScale, state.detailScale,
-        state.filterPreview, state.labOpen, state.labRecipe, state.labBaseId, state.labIntensity,
+        state.filter, state.intensity, state.sizeScale, state.detailScale, state.filterPreview,
     ) {
-        renderer.setSpec(viewModel.effectiveSpec(), viewModel.effectiveIntensity())
+        renderer.setSpec(viewModel.effectiveSpec(), state.intensity)
     }
     LaunchedEffect(state.filter) {
         val specs = state.specs
@@ -368,7 +386,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            viewModel.detachPreview()
+            viewModel.releasePreview(texture)
         }
     }
 
@@ -377,30 +395,26 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     val aspectRatio = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        // The Lab keeps the viewfinder but drops the camera chrome: the grade is
-        // edited below the finder, not behind a full-screen panel.
-        if (!state.labOpen) {
-            TopBar(
-                rotation = orientAngle,
-                showMirror = state.frontCamera,
-                mirrorOn = state.mirrorFront,
-                onMirror = viewModel::toggleMirror,
-                onSettings = { viewModel.setSettingsOpen(true) },
-            )
-            QuickBar(
-                rotation = orientAngle,
-                aspectBadge = ASPECT_LABELS[state.viewAspect.coerceIn(0, ASPECT_LABELS.lastIndex)],
-                timerBadge = state.timerSeconds.takeIf { it > 0 }?.let { "${it}s" },
-                gridOn = state.gridOn,
-                flashOn = state.flashOn,
-                onAspect = viewModel::cycleAspect,
-                onAspectLong = { optionSheet = "aspect" },
-                onTimer = viewModel::cycleTimer,
-                onTimerLong = { optionSheet = "timer" },
-                onGrid = { viewModel.setGrid(!state.gridOn) },
-                onFlash = viewModel::toggleFlash,
-            )
-        }
+        TopBar(
+            rotation = orientAngle,
+            showMirror = state.frontCamera,
+            mirrorOn = state.mirrorFront,
+            onMirror = viewModel::toggleMirror,
+            onSettings = { viewModel.setSettingsOpen(true) },
+        )
+        QuickBar(
+            rotation = orientAngle,
+            aspectBadge = ASPECT_LABELS[state.viewAspect.coerceIn(0, ASPECT_LABELS.lastIndex)],
+            timerBadge = state.timerSeconds.takeIf { it > 0 }?.let { "${it}s" },
+            gridOn = state.gridOn,
+            flashOn = state.flashOn,
+            onAspect = viewModel::cycleAspect,
+            onAspectLong = { optionSheet = "aspect" },
+            onTimer = viewModel::cycleTimer,
+            onTimerLong = { optionSheet = "timer" },
+            onGrid = { viewModel.setGrid(!state.gridOn) },
+            onFlash = viewModel::toggleFlash,
+        )
 
         BoxWithConstraints(
             Modifier
@@ -573,55 +587,10 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             }
         }
 
-        if (state.labOpen) {
-            BackHandler { viewModel.closeLab() }
-            FilterLabPanel(
-                tab = state.labTab,
-                name = state.labName,
-                recipe = state.labRecipe,
-                intensity = state.labIntensity,
-                saved = state.labRecipes,
-                canSave = viewModel.canSaveLab(),
-                onTab = viewModel::setLabTab,
-                onName = viewModel::setLabName,
-                onTemplate = viewModel::setLabTemplate,
-                onKnob = viewModel::setLabKnob,
-                onResetKnob = viewModel::resetLabKnob,
-                onResetAll = viewModel::resetLabKnobs,
-                onEffect = viewModel::setLabEffect,
-                onDuoColour = viewModel::setLabDuotoneColour,
-                luts = remember(state.labLutTick) { viewModel.labLuts() },
-                onPickLut = { id ->
-                    viewModel.setLabLut(id)
-                    viewModel.uploadLut(id, renderer)
-                },
-                onImportLut = { lutPicker.launch("image/*") },
-                onLutAmount = viewModel::setLabLutAmount,
-                palette = palette,
-                watermarks = watermarks,
-                onToggleStamp = viewModel::toggleLabStamp,
-                onStampText = viewModel::setLabStampText,
-                onStampColour = viewModel::setLabStampColour,
-                onStampPosition = viewModel::setLabStampPosition,
-                onStampAlpha = viewModel::setLabStampAlpha,
-                onPickWatermark = viewModel::setLabWatermark,
-                onImportWatermark = { markPicker.launch("image/*") },
-                onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
-                onExtractPalette = viewModel::extractPalette,
-                onApplyPaletteColour = viewModel::applyPaletteColour,
-                onShare = viewModel::shareRecipe,
-                onImportQr = { qrPicker.launch("image/*") },
-                onIntensity = viewModel::setLabIntensity,
-                onSave = viewModel::saveLab,
-                onEdit = viewModel::editLabRecipe,
-                onDelete = viewModel::deleteLabRecipe,
-                onClose = viewModel::closeLab,
-            )
-        } else {
-            FilterHandleBar(
-                    filterName = state.filter.displayName,
-                    onOpen = { showFilters = true },
-                )
+        FilterHandleBar(
+            filterName = state.filter.displayName,
+            onOpen = { showFilters = true },
+        )
 
         ModeRow(mode = state.mode, onMode = viewModel::setMode)
 
@@ -695,7 +664,6 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                     }
                 }
             }
-            }
         }
     }
 
@@ -716,7 +684,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             onSelect = viewModel::selectFilter,
             onToggleFavorite = viewModel::toggleFavorite,
             onHintShown = viewModel::markStripHintSeen,
-            onOpenLab = { viewModel.openLab() },
+            onOpenLab = { viewModel.setMode(CameraViewModel.MODE_LAB) },
             onDismiss = { showFilters = false },
         )
     }
@@ -1154,6 +1122,15 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
         )
         Spacer(Modifier.width(16.dp))
         ModePill("Video", active = mode == "video", onClick = { onMode("video") })
+        Spacer(Modifier.width(16.dp))
+        Box(
+            Modifier
+                .height(20.dp)
+                .width(1.dp)
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f)),
+        )
+        Spacer(Modifier.width(16.dp))
+        ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") })
     }
 }
 
@@ -1203,7 +1180,7 @@ private fun GalleryButton(thumb: Bitmap?, rotation: Float, onClick: () -> Unit) 
 }
 
 @Composable
-private fun ViewfinderCorners(modifier: Modifier = Modifier) {
+fun ViewfinderCorners(modifier: Modifier = Modifier) {
     Canvas(modifier.padding(12.dp)) {
         val arm = 28.dp.toPx()
         val w = 3.dp.toPx()

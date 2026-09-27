@@ -67,7 +67,6 @@ data class CameraUiState(
     val photoCard: Boolean = false,
     val settingsOpen: Boolean = false,
     // ---- Filter Lab ----
-    val labOpen: Boolean = false,
     /** 0 = Basic (template + intensity), 1 = Advanced (the five knobs). */
     val labTab: Int = 0,
     val labName: String = "",
@@ -80,6 +79,8 @@ data class CameraUiState(
     val labRecipes: List<com.retrocam.catalog.lab.SavedRecipe> = emptyList(),
     /** Bumped when the set of available LUTs changes, to re-read the list. */
     val labLutTick: Int = 0,
+    /** Id of the saved recipe the draft came from, if any. Drives the bridge button. */
+    val savedRecipeId: String? = null,
     val zoomRatio: Float = 1f,
     val mode: String = "photo",
     val recording: Boolean = false,
@@ -147,6 +148,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun toggleLabStamp() {
+        pendingSelectedRecipe = null
         _uiState.update { s ->
             val on = !s.labRecipe.stampText.isNullOrBlank()
             s.copy(
@@ -177,6 +179,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun setLabWatermark(id: String?) {
+        pendingSelectedRecipe = null
         _uiState.update { it.copy(labRecipe = it.labRecipe.copy(watermarkId = id)) }
         id?.let { uploadWatermark(it) }
     }
@@ -286,7 +289,7 @@ class CameraViewModel @Inject constructor(
             // A recipe whose base filter this install no longer has cannot render,
             // so do not select it; it stays in the list for later.
             if (r.toSpec() != null) {
-                _uiState.update { it.copy(labOpen = true, labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
+                _uiState.update { it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
             }
         }
     }
@@ -385,6 +388,20 @@ class CameraViewModel @Inject constructor(
         controller.unbind()
         previewOwner = null
         previewTexture = null
+    }
+
+    /**
+     * Detach, but only if [texture] is the surface currently bound.
+     *
+     * Both the camera and the Lab register a surface, and when the mode switches
+     * both compositions tear down and set up within the same pass. If the camera
+     * screen's dispose lands *after* the Lab has already bound its own surface, an
+     * unconditional detach would leave the Lab's viewfinder black. Checking which
+     * surface we are releasing makes the order irrelevant.
+     */
+    fun releasePreview(texture: SurfaceTexture?) {
+        if (texture != null && previewTexture != null && previewTexture !== texture) return
+        detachPreview()
     }
 
     fun selectFilter(spec: FilterSpec) {
@@ -493,9 +510,9 @@ class CameraViewModel @Inject constructor(
     /** What the preview pipeline should render (bypass Original when toggled off). */
     fun effectiveSpec(): FilterSpec {
         val s = _uiState.value
-        // While the Lab is open the draft is what the finder shows, so the grade
-        // is live rather than something you only see after saving.
-        if (s.labOpen) {
+        // In the Lab the draft is what its own viewfinder shows, so the grade is
+        // live rather than something you only see after saving.
+        if (isLab()) {
             val base = FilterCatalog.byId[s.labBaseId] ?: FilterCatalog.default
             return base.copy(lab = s.labRecipe)
         }
@@ -508,29 +525,31 @@ class CameraViewModel @Inject constructor(
 
     /** Intensity for the live preview: the Lab's own slider while it is open. */
     fun effectiveIntensity(): Float =
-        if (_uiState.value.labOpen) _uiState.value.labIntensity else _uiState.value.intensity
+        if (isLab()) _uiState.value.labIntensity else _uiState.value.intensity
 
     // ---- Filter Lab ----
 
+    fun isLab(): Boolean = _uiState.value.mode == MODE_LAB
+
     /**
-     * Opens the Lab. The draft starts as a copy of whatever is selected, so
-     * "adjust the filter I am already using" is the default path rather than
-     * something you have to set up.
+     * Entering the Lab seeds the draft from whatever the camera is currently
+     * showing, so "tweak the filter I am already using" is the default path
+     * rather than something you have to set up.
      */
-    fun openLab() {
+    private fun enterLab() {
         val s = _uiState.value
         refreshOverlays()
         val editing = s.labRecipes.firstOrNull { it.id == s.filter.id }
         _uiState.update {
             if (editing != null) {
                 it.copy(
-                    labOpen = true, labTab = 0, labName = editing.name,
+                    mode = MODE_LAB, labTab = 0, labName = editing.name,
                     labBaseId = editing.baseId, labRecipe = editing.lab,
-                    labIntensity = s.intensity,
+                    labIntensity = s.intensity, savedRecipeId = editing.id,
                 )
             } else {
                 it.copy(
-                    labOpen = true, labTab = 0,
+                    mode = MODE_LAB, labTab = 0,
                     labName = if (s.filter.id.startsWith("lab_")) s.filter.displayName else "",
                     labBaseId = s.filter.id,
                     labRecipe = s.filter.lab ?: com.retrocam.catalog.lab.LabRecipe(),
@@ -540,8 +559,10 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    /** Leaves the Lab and goes back to the camera. */
     fun closeLab() {
-        _uiState.update { it.copy(labOpen = false) }
+        if (_uiState.value.recording) return
+        _uiState.update { it.copy(mode = MODE_PHOTO) }
     }
 
     fun setLabTab(tab: Int) {
@@ -557,6 +578,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun setLabTemplate(templateId: String?) {
+        pendingSelectedRecipe = null
         _uiState.update { it.copy(labRecipe = it.labRecipe.copy(templateId = templateId)) }
     }
 
@@ -568,6 +590,7 @@ class CameraViewModel @Inject constructor(
 
     /** Updates one grading knob. [which] indexes [com.retrocam.catalog.lab.Knob.RANGES]. */
     fun setLabKnob(which: Int, value: Float) {
+        pendingSelectedRecipe = null
         _uiState.update { s ->
             val knobs = com.retrocam.catalog.lab.LabAdjustments.RANGES
             val k = knobs.getOrNull(which) ?: return@update s
@@ -586,6 +609,7 @@ class CameraViewModel @Inject constructor(
 
     /** Updates one effect amount. [which] indexes [com.retrocam.catalog.lab.LAB_EFFECTS]. */
     fun setLabEffect(which: Int, value: Float) {
+        pendingSelectedRecipe = null
         _uiState.update { it.copy(labRecipe = it.labRecipe.withEffect(which, value)) }
     }
 
@@ -601,6 +625,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun setLabLut(id: String?) {
+        pendingSelectedRecipe = null
         _uiState.update {
             it.copy(
                 labRecipe = it.labRecipe.copy(
@@ -675,32 +700,54 @@ class CameraViewModel @Inject constructor(
     fun canSaveLab(): Boolean = !_uiState.value.labRecipe.isIdentity
 
     /**
-     * Saves the draft, selects it, and closes the Lab. The selection matters:
-     * otherwise the finder would snap back to the old filter the moment the Lab
-     * closed, which reads as "my filter didn't save".
+     * Persists the draft. Deliberately does NOT select it or leave the Lab: the
+     * two are separate screens now, so saving is just saving, and handing the
+     * recipe to the camera is the explicit [useRecipeInCamera] step.
      */
     fun saveLab() {
         val s = _uiState.value
         if (s.labRecipe.isIdentity) return
+        // Remember which recipe this draft is, so "use in camera" knows what to
+        // hand over without re-deriving it from the name.
+        pendingSelectedRecipe = null
         val saved = com.retrocam.catalog.lab.SavedRecipe.create(
             name = s.labName.ifBlank { s.labBaseId.uppercase() },
             baseId = s.labBaseId,
             lab = s.labRecipe,
         )
-        val spec = saved.toSpec() ?: return
+        if (saved.toSpec() == null) return
         viewModelScope.launch {
-            val merged = (settings.customRecipes.first().mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
+            val merged = (settings.customRecipes.first()
+                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
                 .filter { it.id != saved.id }) + saved
             settings.setCustomRecipes(merged.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
             settings.setIntensity(saved.id, s.labIntensity)
+            _uiState.update { it.copy(savedRecipeId = saved.id) }
+        }
+    }
+
+    /** Forgets the current selection, hiding the bridge button. */
+    fun clearLabSelection() {
+        _uiState.update { it.copy(savedRecipeId = null) }
+        pendingSelectedRecipe = null
+    }
+
+    @Volatile private var pendingSelectedRecipe: String? = null
+
+    /**
+     * The bridge: hand a saved recipe to the camera and switch to it.
+     *
+     * This is the only thing that crosses between the two halves. Recipes live in
+     * DataStore, so both sides read the same list without sharing any state.
+     */
+    fun useRecipeInCamera(id: String) {
+        val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
+        val spec = r.toSpec() ?: return
+        _uiState.update { it.copy(filter = spec, mode = MODE_PHOTO) }
+        viewModelScope.launch {
+            settings.setIntensity(spec.id, _uiState.value.labIntensity)
             _uiState.update {
-                it.copy(
-                    labOpen = false,
-                    filter = spec,
-                    intensity = s.labIntensity,
-                    sizeScale = 1f,
-                    detailScale = 1f,
-                )
+                it.copy(intensity = it.labIntensity, sizeScale = 1f, detailScale = 1f)
             }
         }
     }
@@ -718,10 +765,7 @@ class CameraViewModel @Inject constructor(
     fun editLabRecipe(id: String) {
         val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
         _uiState.update {
-            it.copy(
-                labOpen = true, labTab = 1, labName = r.name,
-                labBaseId = r.baseId, labRecipe = r.lab,
-            )
+            it.copy(labTab = 1, labName = r.name, labBaseId = r.baseId, labRecipe = r.lab, savedRecipeId = r.id)
         }
     }
 
@@ -867,6 +911,14 @@ class CameraViewModel @Inject constructor(
 
     fun setMode(mode: String) {
         if (_uiState.value.recording) return
+        if (mode == MODE_LAB) {
+            enterLab()
+            return
+        }
+        if (mode == MODE_PHOTO || mode == MODE_VIDEO) {
+            _uiState.update { it.copy(mode = mode) }
+            return
+        }
         _uiState.update { it.copy(mode = mode) }
     }
 
@@ -1039,6 +1091,10 @@ class CameraViewModel @Inject constructor(
     )
 
     companion object {
+        const val MODE_PHOTO = "photo"
+        const val MODE_VIDEO = "video"
+        const val MODE_LAB = "lab"
+
         /** Slider range in EV, identical for every camera (see setExposure). */
         const val EXPOSURE_MIN = -6
         const val EXPOSURE_MAX = 6

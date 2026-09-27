@@ -20,11 +20,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +40,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -94,11 +95,13 @@ fun FilterLabPanel(
     onApplyPaletteColour: (Int, Boolean) -> Unit,
     onShare: (String) -> Unit,
     onImportQr: () -> Unit,
+    selectedRecipeId: String?,
+    onUse: (String) -> Unit,
+    onDeleteSelected: () -> Unit,
     onIntensity: (Float) -> Unit,
     onSave: () -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
-    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val accent = MaterialTheme.colorScheme.primary
@@ -108,35 +111,10 @@ fun FilterLabPanel(
         modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp)
-            .padding(top = 10.dp, bottom = 14.dp),
+            .padding(top = 4.dp, bottom = 20.dp),
     ) {
-        // ---- header ----
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Filled.Science,
-                    contentDescription = null,
-                    tint = accent,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "FILTER LAB",
-                    fontFamily = RetroType.Display,
-                    fontSize = 12.sp,
-                    color = accent,
-                )
-            }
-            IconButton(onClick = onClose) {
-                Icon(Icons.Filled.Close, "Close Filter Lab", tint = MaterialTheme.colorScheme.onBackground)
-            }
-        }
-
         // ---- tabs ----
         Row(
             Modifier
@@ -294,6 +272,38 @@ fun FilterLabPanel(
             LabButton("SAVE", enabled = canSave, accent = accent, onClick = onSave)
         }
 
+        // ---- the bridge: hand the draft to the camera ----
+        // Saving and using are separate on purpose. The two halves only meet
+        // here, so this is the one action that crosses between them.
+        if (selectedRecipeId != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.primary)
+                    .clickable { onUse(selectedRecipeId) }
+                    .padding(vertical = 13.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.Send,
+                    contentDescription = null,
+                    tint = Color.Black,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "USE IN CAMERA",
+                    fontFamily = RetroType.Mono,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = Color.Black,
+                )
+            }
+        }
+
         // ---- saved recipes ----
         if (saved.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -319,10 +329,14 @@ fun FilterLabPanel(
                     .verticalScroll(rememberScrollState()),
             ) {
                 saved.forEach { r ->
+                    val selected = r.id == selectedRecipeId
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .height(44.dp)
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                            )
                             .clickable { onEdit(r.id) }
                             .padding(horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -330,9 +344,10 @@ fun FilterLabPanel(
                         Text(
                             r.name,
                             fontFamily = RetroType.Mono,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.weight(1f),
                         )
                         IconButton(onClick = { onEdit(r.id) }) {
