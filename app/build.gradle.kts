@@ -48,4 +48,8 @@ dependencies {
     implementation(libs.camera.view)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    // Filter Lab. Used for date-stamp/watermark rasterization and palette
+    // extraction; the grading math is ported to GLSL in :catalog. Apache-2.0.
+    implementation(libs.filterlibrary)
 }

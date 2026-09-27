@@ -10,6 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // FilterLibrary (Apache-2.0) is not on Maven Central; JitPack builds the
+        // tagged 2.0.0 release. See THIRD_PARTY_NOTICES.md.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 rootProject.name = "RetroCam"
