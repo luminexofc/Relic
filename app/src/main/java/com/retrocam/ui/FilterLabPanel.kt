@@ -952,8 +952,8 @@ private fun XmpReportBlock(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "${result.applied.size} mapped, ${result.ignored.size} not supported",
-                fontFamily = AppType.Sans, fontSize = 10.sp, color = accent,
+                "${result.coveragePercent}% COVERED",
+                fontFamily = AppType.Sans, fontSize = 11.sp, color = accent,
                 modifier = Modifier.weight(1f),
             )
             Text(
@@ -963,32 +963,34 @@ private fun XmpReportBlock(
         }
         if (open) {
             Spacer(Modifier.height(6.dp))
+            // Grouped by tier rather than one flat list, because the question the
+            // reader has is "what can I trust", and that is answered by tier.
             Text(
-                "APPLIED",
+                "EXACT  ${result.exact.size}",
                 fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
             )
-            result.applied.forEach { a ->
-                Text(
-                    (if (a.approx) "~ " else "") + a.key + " " + a.value + " \u2192 " + a.mapsTo,
-                    fontFamily = AppType.Sans, fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+            result.exact.forEach { k ->
+                XmpLine(mark = "=", k.key, k.value, k.mapsTo, dim)
+            }
+            Text(
+                "APPROXIMATE  ${result.approximate.size}",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            result.approximate.forEach { k ->
+                XmpLine(mark = "~", k.key, k.value, k.mapsTo, dim)
+            }
+            Text(
+                "NOT SUPPORTED  ${result.ignored.size}",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            result.ignored.forEach { k ->
+                XmpLine(mark = "x", k.key, k.value, k.reason, dim)
             }
             Spacer(Modifier.height(6.dp))
             Text(
-                "NOT SUPPORTED BY THE LAB",
-                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
-            )
-            result.ignored.forEach { ig ->
-                Text(
-                    ig.key + ": " + ig.reason,
-                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
-                )
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "~ marks an approximation. A preset is always partial: the Lab has " +
-                    "seven knobs and an XMP has around forty settings.",
+                "= exact, ~ close but not the same operation, x dropped. The " +
+                    "percentage counts keys, not visual weight: one tone curve is " +
+                    "worth more than four sliders, and a number cannot say so.",
                 fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
             )
             ShadcnButton(
@@ -999,4 +1001,20 @@ private fun XmpReportBlock(
             )
         }
     }
+}
+
+/** One line of the import report. [detail] is where it went, or why not. */
+@Composable
+private fun XmpLine(
+    mark: String,
+    key: String,
+    value: String,
+    detail: String?,
+    dim: androidx.compose.ui.graphics.Color,
+) {
+    Text(
+        "$mark $key  $value  ->  ${detail.orEmpty()}",
+        fontFamily = AppType.Sans, fontSize = 9.sp,
+        color = if (mark == "x") dim else MaterialTheme.colorScheme.onSurface,
+    )
 }

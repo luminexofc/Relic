@@ -238,7 +238,7 @@ class XmpImportTest {
             res.applied.map { it.key }.containsAll(
                 listOf("Texture", "Clarity", "Dehaze", "Highlights2012", "Shadows2012")))
         // Every drop has to say why, or the report is just a list of absences.
-        assertTrue(res.ignored.all { it.reason.isNotBlank() })
+        assertTrue(res.ignored.all { it.reason.orEmpty().isNotBlank() })
     }
 
     /** Local contrast used to be reported as having no analogue. */
@@ -290,7 +290,7 @@ class XmpImportTest {
     fun `look is still dropped and says why`() {
         val res = XmpImport.parse(modern)
         val look = res.ignored.first { it.key == "Look" }
-        assertTrue(look.reason.contains("no honest mapping"))
+        assertTrue(look.reason.orEmpty().contains("no honest mapping"))
     }
 
     /** The tone curve is the biggest thing a preset carries, so it must land. */
@@ -322,7 +322,7 @@ class XmpImportTest {
     fun `an unreadable curve is reported as unreadable, not as identity`() {
         val res = XmpImport.parse("""crs:ToneCurvePV2012="nonsense"""")
         assertTrue(!res.recipe.toneCurveActive)
-        assertTrue(res.ignored.any { it.key == "ToneCurvePV2012" && it.reason.contains("unreadable") })
+        assertTrue(res.ignored.any { it.key == "ToneCurvePV2012" && it.reason.orEmpty().contains("unreadable") })
     }
 
     @Test
@@ -374,5 +374,80 @@ class XmpImportTest {
             """crs:Contrast2012="0" crs:Exposure2012="0" crs:Saturation="0" crs:Tint="0" """,
         ).recipe
         assertTrue(r.isIdentity)
+    }
+
+    // ---- coverage ----
+
+    /**
+     * A percentage is only useful if it is not always 100 and not always 0, so
+     * these pin both ends and the arithmetic between them.
+     */
+    @Test
+    fun `coverage counts keys, not visual weight, and says so`() {
+        val res = XmpImport.parse(modern)
+        val expected = res.applied.size * 100 / res.keys.size
+        assertEquals(expected, res.coveragePercent)
+        assertTrue("coverage should be partial for a real preset", res.coveragePercent in 1..99)
+        assertEquals(res.exact.size * 100 / res.keys.size, res.exactPercent)
+        assertTrue("exact should not exceed total", res.exactPercent <= res.coveragePercent)
+    }
+
+    @Test
+    fun `a preset with nothing unsupported is full coverage`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""")
+        assertEquals(100, r.coveragePercent)
+        assertEquals(100, r.exactPercent)
+    }
+
+    @Test
+    fun `a preset with nothing mappable is zero coverage`() {
+        val r = XmpImport.parse("""crs:Look="Medium High Contrast"""")
+        assertEquals(0, r.coveragePercent)
+        assertTrue(r.isEmpty)
+    }
+
+    @Test
+    fun `an empty file reports zero rather than dividing by nothing`() {
+        val r = XmpImport.parse("<html></html>")
+        assertEquals(0, r.coveragePercent)
+        assertEquals(0, r.exactPercent)
+        assertTrue(r.keys.isEmpty())
+    }
+
+    /**
+     * Every key lands in exactly one tier. Two parallel lists could drift; one
+     * tagged list cannot, and this is what proves the tagging is total.
+     */
+    @Test
+    fun `every key is in exactly one tier and the views partition them`() {
+        val res = XmpImport.parse(modern)
+        assertEquals(res.keys.size, res.exact.size + res.approximate.size + res.ignored.size)
+        assertEquals(res.applied.size, res.exact.size + res.approximate.size)
+        assertTrue(res.exact.none { it.reason != null })
+        assertTrue(res.ignored.all { it.mapsTo == null })
+        assertTrue(res.applied.all { it.mapsTo != null && it.mapsTo.isNotBlank() })
+    }
+
+    @Test
+    fun `no key appears twice in the report`() {
+        val res = XmpImport.parse(modern)
+        val dupes = res.keys.groupBy { it.key }.filterValues { it.size > 1 }
+        assertTrue("duplicated: " + dupes.keys, dupes.isEmpty())
+    }
+
+    /** The tiers are what the UI marks, so they have to be the real ones. */
+    @Test
+    fun `the tiers separate the exact from the approximate`() {
+        val res = XmpImport.parse(modern)
+        val exact = res.exact.map { it.key }.toSet()
+        val approx = res.approximate.map { it.key }.toSet()
+        // Direct unit matches.
+        assertTrue(exact.contains("Contrast2012"))
+        assertTrue(exact.contains("Tint"))
+        // Remapped or rescaled.
+        assertTrue(approx.contains("Exposure2012"))
+        assertTrue(approx.contains("ColorTemp"))
+        assertTrue(approx.contains("GrainSize"))
+        assertTrue(exact.none { it in approx })
     }
 }

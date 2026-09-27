@@ -3,25 +3,64 @@ package com.retrocam.catalog.lab
 import kotlin.math.ln
 import kotlin.math.roundToInt
 
+/** How faithfully one XMP setting is reproduced. */
+enum class Fidelity {
+    /** The same operation, same units. */
+    EXACT,
+
+    /**
+     * Something in the same neighbourhood. The knob is not what the key does,
+     * only close to it, and saying so is the difference between an import the
+     * user can trust and one they have to guess at.
+     */
+    APPROXIMATE,
+
+    /** No Lab equivalent. [XmpKey.reason] says why. */
+    UNSUPPORTED,
+}
+
 /**
- * One XMP key that was turned into something.
+ * One XMP key and what became of it.
  *
- * [approx] is the honest part: when true, the Lab knob is not the same operation
- * as the XMP key, only something in its neighbourhood. Showing that is the
- * difference between an import the user can trust and one they have to guess at.
+ * A single tagged list rather than separate "applied" and "ignored" lists,
+ * because the two are the same question asked twice and keeping them in sync
+ * is how a key ends up in neither. [XmpResult.applied] and [XmpResult.ignored]
+ * are views over this, not storage.
  */
-data class XmpApplied(
+data class XmpKey(
     val key: String,
     val value: String,
-    val mapsTo: String,
-    val approx: Boolean = false,
-)
+    val fidelity: Fidelity,
+    /** The Lab control, e.g. "GAMMA = 1.27". Null when unsupported. */
+    val mapsTo: String? = null,
+    /** Why it was dropped. Null unless unsupported. */
+    val reason: String? = null,
+) {
+    /** Kept because the report and the tests both read it under this name. */
+    val approx: Boolean get() = fidelity == Fidelity.APPROXIMATE
+}
 
-/** One XMP key that was deliberately dropped, and why. */
-data class XmpIgnored(val key: String, val value: String, val reason: String)
-
-data class XmpResult(val recipe: LabRecipe, val applied: List<XmpApplied>, val ignored: List<XmpIgnored>) {
+data class XmpResult(val recipe: LabRecipe, val keys: List<XmpKey>) {
+    val applied: List<XmpKey> get() = keys.filter { it.fidelity != Fidelity.UNSUPPORTED }
+    val ignored: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.UNSUPPORTED }
+    val exact: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.EXACT }
+    val approximate: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.APPROXIMATE }
     val isEmpty: Boolean get() = applied.isEmpty()
+
+    /**
+     * How much of this preset the Lab represents, as a whole percentage.
+     *
+     * Counts keys, not visual weight, and that is the honest limit of it: one
+     * `ToneCurvePV2012` is worth more than four sliders, and a percentage
+     * cannot say so. The breakdown is right there beside it for exactly that
+     * reason, and the report names the unsupported keys so a reader can judge.
+     */
+    val coveragePercent: Int
+        get() = if (keys.isEmpty()) 0 else applied.size * 100 / keys.size
+
+    /** The share reproduced exactly, with approximations counted out. */
+    val exactPercent: Int
+        get() = if (keys.isEmpty()) 0 else exact.size * 100 / keys.size
 }
 
 /**
@@ -90,8 +129,7 @@ object XmpImport {
     /** All locals, so two imports cannot bleed into each other. */
     fun parse(xmp: String): XmpResult {
         val a = readAttributes(xmp)
-        val applied = mutableListOf<XmpApplied>()
-        val ignored = mutableListOf<XmpIgnored>()
+        val keys = mutableListOf<XmpKey>()
 
         var gamma = 1f
         var contrast = 1f
@@ -110,11 +148,15 @@ object XmpImport {
         var vignette = 0f
 
         fun add(key: String, value: String, mapsTo: String, approx: Boolean = false) {
-            applied += XmpApplied(key, value, mapsTo, approx)
+            keys += XmpKey(
+                key, value,
+                if (approx) Fidelity.APPROXIMATE else Fidelity.EXACT,
+                mapsTo = mapsTo,
+            )
         }
 
         fun drop(key: String, reason: String) {
-            a[key]?.let { ignored += XmpIgnored(key, it, reason) }
+            a[key]?.let { keys += XmpKey(key, it, Fidelity.UNSUPPORTED, reason = reason) }
         }
 
         // Which key family is present decides the scale, and getting this wrong
@@ -215,7 +257,7 @@ object XmpImport {
             val v = a[key] ?: continue
             val c = ToneCurve.parse(v)
             if (c == null) {
-                ignored += XmpIgnored(key, v, "unreadable: not a list of (x, y) points")
+                keys += XmpKey(key, v, Fidelity.UNSUPPORTED, reason = "unreadable: not a list of (x, y) points")
                 continue
             }
             curves[slot] = c
@@ -327,10 +369,10 @@ object XmpImport {
 
         // Anything else in the file is listed too, so the report is a real
         // inventory of the preset rather than a fixed list with holes in it.
-        val seen = applied.map { it.key }.toSet() + ignored.map { it.key }.toSet()
+        val seen = keys.map { it.key }.toSet()
         for ((k, v) in a) {
             if (k in seen || k in METADATA) continue
-            ignored += XmpIgnored(k, v, "not a look setting")
+            keys += XmpKey(k, v, Fidelity.UNSUPPORTED, reason = "not a look setting")
         }
 
         return XmpResult(
@@ -363,8 +405,7 @@ object XmpImport {
                 vigFeather = vigFeather,
                 vignette = vignette,
             ),
-            applied = applied,
-            ignored = ignored,
+            keys = keys,
         )
     }
 }
