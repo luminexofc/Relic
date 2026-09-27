@@ -973,7 +973,10 @@ class FilterRenderer(
             // 1.0 before it touches the rect.
             if (mask != null && !mask.isFull) {
                 val m = LabMask.coerce(mask)
-                GLES20.glUniform4f(prog.uMaskRect, m.rect()[0], m.rect()[1], m.rect()[2], m.rect()[3])
+                // rect() allocates, and this runs on every link of every frame,
+                // so it is called once rather than once per component.
+                val r = m.rect()
+                GLES20.glUniform4f(prog.uMaskRect, r[0], r[1], r[2], r[3])
                 GLES20.glUniform1f(prog.uMaskShape, m.shape.shaderCode)
                 GLES20.glUniform1f(prog.uMaskFeather, m.feather)
             } else {

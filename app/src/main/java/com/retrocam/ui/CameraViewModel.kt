@@ -855,15 +855,15 @@ class CameraViewModel @Inject constructor(
      * to end up with a mask that mirrors the one the user drew.
      */
     fun setLabStageMaskFromDrag(index: Int, x0: Float, y0: Float, x1: Float, y1: Float) {
-        val shape = _uiState.value.labRecipe.stages.getOrNull(index)?.mask?.shape
-            ?: MaskShape.RECT
+        // Read the stage once. Reading _uiState twice means the second read can
+        // land after the stage was removed, which is an index crash in the middle
+        // of what should be a gesture.
+        val current = _uiState.value.labRecipe.stages.getOrNull(index) ?: return
         setLabStageMask(
             index,
-            LabMask(
-                shape = shape,
+            current.mask.copy(
                 x = minOf(x0, x1), y = minOf(y0, y1),
                 width = kotlin.math.abs(x1 - x0), height = kotlin.math.abs(y1 - y0),
-                feather = _uiState.value.labRecipe.stages[index].mask.feather,
             ),
         )
     }

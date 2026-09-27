@@ -98,10 +98,17 @@ fun LabScreen(viewModel: CameraViewModel) {
      * nobody and the mask could never be drawn in the first place.
      */
     var selectedStage by remember { mutableStateOf(0) }
-    // Clamped on every read: removing a stage can leave the selection past the
-    // end, and an out-of-range index would silently do nothing.
-    val stageIndex = selectedStage
-        .coerceIn(0, (state.labRecipe.stages.size - 1).coerceAtLeast(0))
+    // -1 when there is nothing to select, and clamped otherwise.
+    //
+    // This must NOT be `coerceIn(0, (size - 1).coerceAtLeast(0))`: that yields 0
+    // for an empty list, so every `index >= 0` guard downstream passes and the
+    // first read of stages[0] throws. The Lab always opens with no stages, so
+    // that crashed on launch rather than at some edge case.
+    val stageIndex = if (state.labRecipe.stages.isEmpty()) {
+        -1
+    } else {
+        selectedStage.coerceIn(0, state.labRecipe.stages.lastIndex)
+    }
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val watermarks by viewModel.watermarks.collectAsStateWithLifecycle()
 
@@ -221,24 +228,6 @@ fun LabScreen(viewModel: CameraViewModel) {
                     }
                 },
         ) {
-            // ---- area mask picker ----
-            // A drag over the preview sets the selected stage's mask, and the
-            // outline is drawn on top so what you are selecting is visible while
-            // the filter runs underneath it. The drag only arms once a stage is
-            // selected, otherwise every tap on the viewfinder would start moving
-            // a mask nobody asked for.
-            MaskPicker(
-                enabled = stageIndex >= 0,
-                mask = stageIndex.takeIf { it >= 0 }
-                    ?.let { state.labRecipe.stages[it].maskClamped },
-                onDrag = { x0, y0, x1, y1 ->
-                    stageIndex.takeIf { it >= 0 }?.let {
-                        viewModel.setLabStageMaskFromDrag(it, x0, y0, x1, y1)
-                    }
-                },
-                modifier = Modifier.matchParentSize(),
-            )
-
             AndroidView(
                 factory = { ctx ->
                     GLSurfaceView(ctx).apply {
@@ -250,7 +239,28 @@ fun LabScreen(viewModel: CameraViewModel) {
                         glView = this
                     }
                 },
+
+
                 modifier = Modifier.fillMaxSize(),
+            )
+            // After the AndroidView, not before: Compose draws later children on
+            // top, and a picker underneath a GLSurfaceView would never see a
+            // touch or show its outline.
+            // ---- area mask picker ----
+            // A drag over the preview sets the selected stage's mask, and the
+            // outline is drawn on top so what you are selecting is visible while
+            // the filter runs underneath it. The drag only arms once a stage is
+            // selected, otherwise every tap on the viewfinder would start moving
+            // a mask nobody asked for.
+            MaskPicker(
+                enabled = stageIndex >= 0,
+                mask = state.labRecipe.stages.getOrNull(stageIndex)?.maskClamped,
+                onDrag = { x0, y0, x1, y1 ->
+                    if (stageIndex >= 0) {
+                        viewModel.setLabStageMaskFromDrag(stageIndex, x0, y0, x1, y1)
+                    }
+                },
+                modifier = Modifier.matchParentSize(),
             )
             ViewfinderCorners(Modifier.fillMaxSize())
             Text(
