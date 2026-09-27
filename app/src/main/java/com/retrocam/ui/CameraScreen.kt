@@ -2,6 +2,13 @@
 
 package com.retrocam.ui
 
+import com.retrocam.ui.components.ButtonSize
+import com.retrocam.ui.components.ButtonVariant
+import com.retrocam.ui.components.ShadcnButton
+import com.retrocam.ui.components.ShadcnBottomSheet
+import com.retrocam.ui.components.ShadcnDialog
+import com.retrocam.ui.components.ShadcnInput
+import com.retrocam.ui.components.ShadcnSlider
 import com.retrocam.ui.theme.AppType
 import com.retrocam.ui.theme.ShadcnRadius
 
@@ -516,11 +523,12 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                                 fontFamily = AppType.Sans,
                                 color = MaterialTheme.colorScheme.primary,
                             )
-                            Slider(
+                            ShadcnSlider(
                                 value = state.exposureIndex.toFloat(),
                                 onValueChange = { viewModel.setExposure(it.toInt()) },
                                 valueRange = state.exposureMin.toFloat()..state.exposureMax.toFloat(),
                                 steps = (state.exposureMax - state.exposureMin - 1).coerceAtLeast(0),
+                                label = "Exposure",
                             )
                             if (state.focusLocked) {
                                 Text(
@@ -652,20 +660,25 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                     }
                 }
             }
-            IconButton(onClick = { onFlip() }) {
-                Oriented(rotation = orientAngle) {
-                    key(state.frontCamera) {
-                        PopIn(key = state.frontCamera, reduced = reducedMotion) {
-                            Icon(
-                                imageVector = Icons.Filled.Autorenew,
-                                contentDescription = "Flip camera",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp),
-                            )
+            ShadcnButton(
+                onClick = { onFlip() },
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Oriented(rotation = orientAngle) {
+                        key(state.frontCamera) {
+                            PopIn(key = state.frontCamera, reduced = reducedMotion) {
+                                Icon(
+                                    imageVector = Icons.Filled.Autorenew,
+                                    contentDescription = "Flip camera",
+                                    tint = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
                         }
                     }
-                }
-            }
+                },
+            )
         }
     }
 
@@ -742,24 +755,36 @@ private fun TopBar(
         )
         Oriented(rotation) {
             if (showMirror) {
-                IconButton(onClick = onMirror) {
-                    Icon(
-                        imageVector = Icons.Filled.Flip,
-                        contentDescription = "Mirror front camera",
-                        tint = if (mirrorOn) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onBackground,
-                    )
-                }
+                ShadcnButton(
+                    onClick = onMirror,
+                    variant = ButtonVariant.Ghost,
+                    size = ButtonSize.Icon,
+                    leading = {
+                        Icon(
+                            imageVector = Icons.Filled.Flip,
+                            contentDescription = "Mirror front camera",
+                            tint = if (mirrorOn) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    },
+                )
             }
         }
         Oriented(rotation) {
-            IconButton(onClick = onSettings) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    tint = MaterialTheme.colorScheme.onBackground,
-                )
-            }
+            ShadcnButton(
+                onClick = onSettings,
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    Icon(
+                        imageVector = Icons.Filled.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(22.dp),
+                    )
+                },
+            )
         }
     }
 }
@@ -828,18 +853,24 @@ private fun QuickBar(
         }
         QuickDivider()
         Oriented(rotation, Modifier.weight(1f)) {
-            IconButton(onClick = onFlash) {
-                key(flashOn) {
-                    PopIn(key = flashOn, reduced = reduced) {
-                        Icon(
-                            imageVector = if (flashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                            contentDescription = "Flash",
-                            tint = if (flashOn) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onBackground,
-                        )
+            ShadcnButton(
+                onClick = onFlash,
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                leading = {
+                    key(flashOn) {
+                        PopIn(key = flashOn, reduced = reduced) {
+                            Icon(
+                                imageVector = if (flashOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                                contentDescription = "Flash",
+                                tint = if (flashOn) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
                     }
-                }
-            }
+                },
+            )
         }
     }
 }
@@ -906,32 +937,14 @@ fun OptionsDialog(
     onPick: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title, fontFamily = AppType.Sans) },
-        text = {
-            LazyColumn {
-                items(options) { option ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onPick(option)
-                                onDismiss()
-                            }
-                            .padding(vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        androidx.compose.material3.RadioButton(
-                            selected = option == selected,
-                            onClick = null,
-                        )
-                        Text(option, fontFamily = AppType.Sans)
-                    }
-                }
-            }
-        },
-        confirmButton = {},
+    // shadcn Dialog: the same card used everywhere else, with a selection bar in
+    // place of a radio button.
+    ShadcnDialog(
+        title = title,
+        options = options,
+        selected = selected,
+        onPick = { onPick(it) },
+        onDismiss = onDismiss,
     )
 }
 
@@ -987,7 +1000,7 @@ private fun FilterDrawer(
     onOpenLab: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ShadcnBottomSheet(onDismiss = onDismiss) {
         var query by remember { mutableStateOf("") }
         val shown = remember(query, specs) { specs.filter { it.matches(query) } }
         Column(
@@ -1003,27 +1016,32 @@ private fun FilterDrawer(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
             // Name or context: "old film" finds VINTAGE, "x ray" finds XRAY.
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                placeholder = { Text("search name or look…") },
-                leadingIcon = { Icon(Icons.Filled.Search, null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Filled.Close, "Clear")
-                        }
-                    }
-                },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                // Pill shape: 50% of the field height, so both ends round over
-                // instead of the theme's rectangular card edge.
-                shape = RoundedCornerShape(50),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 4.dp),
-            )
+            // shadcn Input rather than a pill OutlinedTextField: a search field is
+            // chrome, and the rounded-rectangle the theme was fighting is exactly
+            // what shadcn replaces.
+            Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
+                ShadcnInput(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = "Search name or look...",
+                )
+                if (query.isNotEmpty()) {
+                    ShadcnButton(
+                        onClick = { query = "" },
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        modifier = Modifier.align(Alignment.CenterEnd).size(28.dp),
+                        leading = {
+                            Icon(
+                                Icons.Filled.Close,
+                                "Clear search",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        },
+                    )
+                }
+            }
             if (shown.isEmpty()) {
                 Text(
                     text = "no filter matches \"$query\"",
@@ -1071,9 +1089,11 @@ private fun FilterDrawer(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Slider(
+            ShadcnSlider(
                 value = intensity,
                 onValueChange = onIntensity,
+                valueRange = 0f..1f,
+                label = "Intensity",
                 modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
             )
             if (hasSize) {
@@ -1083,10 +1103,11 @@ private fun FilterDrawer(
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
-                Slider(
+                ShadcnSlider(
                     value = sizeScale,
                     onValueChange = onSize,
                     valueRange = 0.25f..2.5f,
+                    label = "Size",
                     modifier = Modifier.padding(horizontal = 32.dp, vertical = 4.dp),
                 )
             }

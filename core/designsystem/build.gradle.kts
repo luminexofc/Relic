@@ -26,4 +26,8 @@ dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
+    // BackHandler, used by the dialog and the bottom sheet.
+    implementation(libs.activity.compose)
+    // fadeIn/slideInVertically and friends. Version comes from the BOM.
+    implementation(libs.compose.animation)
 }

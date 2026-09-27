@@ -68,7 +68,7 @@ The visual targets the shaders were tuned against:
 
 **Interface**
 
-- shadcn-style design system: Radix `neutral` token set, 8px radius scale, platform UI/mono type roles, Radix motion timings
+- shadcn-style UI: Radix `neutral` token set, 8px radius scale, platform UI/mono type roles, Radix motion timings. Sliders are a 2dp rail with a 16dp thumb and no ripple; buttons, inputs, switches, cards, dialogs and the filter sheet are all built on it
 - Micro-interactions throughout, with a full **reduced motion** respect path
 - In-app **diagnostics** readout: texture-grab ms and frame ms
 
