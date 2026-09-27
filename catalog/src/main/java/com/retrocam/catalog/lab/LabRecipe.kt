@@ -99,7 +99,20 @@ data class LabRecipe(
      * sampled run bends a curve that was already exact.
      */
     val toneCurves: String = ToneCurve.NONE,
+
+    // Adobe's four range controls, -1..1. Positive lifts, negative rolls off;
+    // see RangeTone for the band weights. XMP's values are -100..100.
+    val highlights: Float = 0f,
+    val shadows: Float = 0f,
+    val whites: Float = 0f,
+    val blacks: Float = 0f,
 ) {
+    /** True when any of the four range controls is off neutral. */
+    val rangesActive: Boolean
+        get() = highlights != 0f || shadows != 0f || whites != 0f || blacks != 0f
+
+    /** `[highlights, shadows, whites, blacks]`, the order the shader wants. */
+    fun rangeArray(): FloatArray = floatArrayOf(highlights, shadows, whites, blacks)
     /** True when at least one tone curve is present. */
     val toneCurveActive: Boolean get() = toneCurves != ToneCurve.NONE
     /** The stage list after clamping, which is what the renderer and codec both use. */
@@ -113,7 +126,7 @@ data class LabRecipe(
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
         get() = templateId == null && adjustments.isNeutral && !hasEffects &&
-            stages.isEmpty() && !toneCurveActive
+            stages.isEmpty() && !toneCurveActive && !rangesActive
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -134,6 +147,10 @@ data class LabRecipe(
         if (!stampText.isNullOrBlank()) add("date stamp")
         if (watermarkId != null) add("watermark")
         if (toneCurveActive) add("tone curve")
+        if (highlights != 0f) add("highlights")
+        if (shadows != 0f) add("shadows")
+        if (whites != 0f) add("whites")
+        if (blacks != 0f) add("blacks")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -189,6 +206,10 @@ data class LabRecipe(
             highlightTint = r.highlightTint,
             stages = r.stagesClamped(),
             toneCurves = r.toneCurves,
+            highlights = r.highlights.coerceIn(-1f, 1f),
+            shadows = r.shadows.coerceIn(-1f, 1f),
+            whites = r.whites.coerceIn(-1f, 1f),
+            blacks = r.blacks.coerceIn(-1f, 1f),
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

@@ -90,6 +90,9 @@ object Shaders {
         uniform sampler2D u_curve;
         uniform float u_curveAmount;
 
+        /** Highlights, Shadows, Whites, Blacks, each -1..1. */
+        uniform vec4 u_ranges;
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -183,6 +186,28 @@ object Shaders {
             ditherCoord = floor(px / blockCell);
             return sampleSrc(centerPx / u_resolution).rgb;
         }
+        // The same smoothstep the Kotlin RangeTone.smooth01 implements.
+        float smooth01(float x) {
+            float t = clamp(x, 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t);
+        }
+
+        // Band weight for one of the four range controls at luminance l. Band
+        // order is Highlights, Shadows, Whites, Blacks, matching RangeTone in
+        // Kotlin. That object is the testable copy of this arithmetic and a
+        // test reads these exact expressions out of this file to check it.
+        float rangeWeight(int band, float l) {
+            if (band == 0) return 1.0 - smooth01((l - 0.05) / 0.50);
+            if (band == 1) return 1.0 - smooth01(l / 0.28);
+            if (band == 2) return smooth01((l - 0.45) / 0.50);
+            return smooth01((l - 0.72) / 0.28);
+        }
+
+        // One band on one channel. Positive lifts, negative rolls off.
+        float rangeAdjust(float c, float w, float a) {
+            return a >= 0.0 ? c + a * w * (1.0 - c) : c * (1.0 + a * w);
+        }
+
         // How much of this stage's effect applies at uv: 1 inside the mask, 0
         // outside, feathered in between. Frame y grows upward, which the band
         // shortcuts rely on. Shape 0 returns a literal 1.0 so the multiply in the
@@ -991,7 +1016,22 @@ object Shaders {
                 c = c * u_contrast + 0.502 * (1.0 - u_contrast) + u_brightness;
             }
 
-            // --- 4. Highlights / Shadows / Whites / Blacks land here (phase 3) ---
+            // --- 4. Highlights, Shadows, Whites, Blacks. Fourth in Adobe's
+            // order, after contrast and before local contrast. Per channel, so
+            // lifting the shadows warms them the way a real print does ---
+            if (abs(u_ranges.x) + abs(u_ranges.y) + abs(u_ranges.z) + abs(u_ranges.w) > 0.001) {
+                float rl = luminance(c);
+                for (int i = 0; i < 4; i++) {
+                    float a = u_ranges[i];
+                    if (abs(a) < 0.001) continue;
+                    float w = rangeWeight(i, rl);
+                    c = vec3(
+                        rangeAdjust(c.r, w, a),
+                        rangeAdjust(c.g, w, a),
+                        rangeAdjust(c.b, w, a)
+                    );
+                }
+            }
 
             // --- 5. Texture / Clarity / Dehaze land here (phase 4). Adobe
             // applies local contrast BEFORE the tone curve, not after. ---

@@ -100,6 +100,10 @@ data class SavedRecipe(
                 append(RecipeCodec.q(lab.watermarkAlpha)).append('|')
                 append(lab.watermarkPosition.ordinal).append('|')
             append(lab.toneCurves).append('|')
+            append(RecipeCodec.q(lab.highlights)).append(',')
+            append(RecipeCodec.q(lab.shadows)).append(',')
+            append(RecipeCodec.q(lab.whites)).append(',')
+            append(lab.blacks).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -141,10 +145,10 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 7
+    const val VERSION = 8
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 33
+    private const val FIELD_COUNT = 37
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -177,6 +181,7 @@ object RecipeCodec {
             // Tone curve last, because it is the only field big enough to matter
             // for payload size and it should not push the fixed fields around.
             lab.toneCurves,
+            q(lab.highlights), q(lab.shadows), q(lab.whites), q(lab.blacks),
         ).joinToString(SEP)
     }
 
@@ -303,6 +308,10 @@ object RecipeCodec {
                     _reserved = parts[30],
                     stages = decodeStages(parts[31]),
                     toneCurves = parts[32].takeIf { it != ToneCurve.NONE } ?: ToneCurve.NONE,
+                    highlights = parts[33].toFloat(),
+                    shadows = parts[34].toFloat(),
+                    whites = parts[35].toFloat(),
+                    blacks = parts[36].toFloat(),
                 ),
             )
             SavedRecipe(

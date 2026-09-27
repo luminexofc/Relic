@@ -161,3 +161,59 @@ object LabGrading {
      * Convenience: template + knobs straight to shader uniforms.
      */
 }
+
+/**
+ * Highlights, Shadows, Whites and Blacks: the four range-specific tone controls.
+ *
+ * Adobe's are proprietary spline edits scoped to a tonal range. This is the
+ * honest approximation every other tool uses: weight each band by luminance with
+ * a smoothstep, then lift or roll off inside that weight only. It gets the
+ * character right - lifting the shadows warms them, recovering the highlights
+ * does not touch the blacks - without Adobe's curve editor.
+ *
+ * The four bands deliberately overlap, because in a real image the midtones
+ * belong to both shadows and highlights and a hard boundary shows as a band.
+ *
+ * This is a Kotlin mirror of the same arithmetic in the shader. The shader is
+ * what runs, but this is what is testable, and the two have to agree: a change
+ * here without a matching change there is a silent difference between the
+ * preview and this function.
+ */
+object RangeTone {
+
+    /** Band edges as `[shadowHi, highLo, highHi, whiteLo]` on 0..1 luminance. */
+    private const val SHADOW_HI = 0.55f
+    private const val LOW_HI = 0.28f
+    private const val HIGH_LO = 0.45f
+    private const val HIGH_HI = 0.95f
+    private const val WHITE_LO = 0.72f
+
+    /** 1 at the darkest end, 0 above [SHADOW_HI]. */
+    fun shadowWeight(l: Float): Float = 1f - smooth01((l - 0.05f) / (SHADOW_HI - 0.05f))
+
+    /** 1 at the brightest end, 0 below [LOW_HI]. */
+    fun blackWeight(l: Float): Float = 1f - smooth01(l / LOW_HI)
+
+    fun highlightWeight(l: Float): Float = smooth01((l - HIGH_LO) / (HIGH_HI - HIGH_LO))
+
+    fun whiteWeight(l: Float): Float = smooth01((l - WHITE_LO) / (1f - WHITE_LO))
+
+    /**
+     * One band, applied to a single channel.
+     *
+     * Positive lifts toward white, negative rolls off toward black. Both are
+     * bounded by the band weight, so the same formula covers the sign change and
+     * there is no discontinuity at zero: at a = 0 the result is c exactly.
+     */
+    fun adjust(c: Float, weight: Float, amount: Float): Float = if (amount >= 0f) {
+        c + amount * weight * (1f - c)
+    } else {
+        c * (1f + amount * weight)
+    }
+
+    /** The same [smoothstep] the shader's `smooth01` implements. */
+    fun smooth01(x: Float): Float {
+        val t = x.coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+}

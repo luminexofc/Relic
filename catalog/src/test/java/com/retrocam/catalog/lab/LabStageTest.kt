@@ -294,7 +294,7 @@ class LabStageTest {
      * for the wrong reason.
      */
     private fun payload(stageField: String): String {
-        val f = MutableList(33) { "0" }
+        val f = MutableList(37) { "0" }
         f[0] = RecipeCodec.VERSION.toString()
         f[1] = java.util.Base64.getUrlEncoder().withoutPadding()
             .encodeToString("T".toByteArray())
@@ -309,6 +309,7 @@ class LabStageTest {
         f[27] = "-"   // watermarkId
         f[31] = stageField
         f[32] = "-"   // tone curve
+        // 33..36 are the range controls, already "0"
         return f.joinToString(",")
     }
 

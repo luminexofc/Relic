@@ -207,14 +207,37 @@ class XmpImportTest {
     }
 
     @Test
-    fun `the range-specific keys are reported as dropped, not vanished`() {
+    fun `the keys with no Lab equivalent are reported, not vanished`() {
         val res = XmpImport.parse(modern)
         val dropped = res.ignored.map { it.key }.toSet()
-        for (k in listOf("Highlights2012", "Shadows2012", "Whites2012", "Blacks2012", "Texture", "Clarity", "Dehaze", "Look", "GrainAmount")) {
+        for (k in listOf("Texture", "Clarity", "Dehaze", "Look", "GrainAmount")) {
             assertTrue("$k was dropped without being reported", k in dropped)
         }
         // Every drop has to say why, or the report is just a list of absences.
         assertTrue(res.ignored.all { it.reason.isNotBlank() })
+    }
+
+    /** The four range controls used to be the biggest thing we threw away. */
+    @Test
+    fun `highlights shadows whites and blacks are applied not dropped`() {
+        val res = XmpImport.parse(modern)
+        val r = res.recipe
+        assertEquals(-42 / 100f, r.highlights, 1e-3f)
+        assertEquals(24 / 100f, r.shadows, 1e-3f)
+        assertEquals(8 / 100f, r.whites, 1e-3f)
+        assertEquals(-11 / 100f, r.blacks, 1e-3f)
+        assertTrue(r.rangesActive)
+        for (k in listOf("Highlights2012", "Shadows2012", "Whites2012", "Blacks2012")) {
+            assertTrue("$k should be applied", res.applied.any { it.key == k })
+            assertTrue("$k should not be in the dropped list", res.ignored.none { it.key == k })
+        }
+    }
+
+    @Test
+    fun `range values are clamped rather than allowed to run away`() {
+        val r = XmpImport.parse("""crs:Highlights2012="+9000" crs:Shadows2012="-9000"""").recipe
+        assertTrue(r.highlights in -1f..1f)
+        assertTrue(r.shadows in -1f..1f)
     }
 
     @Test

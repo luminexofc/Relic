@@ -38,6 +38,8 @@ data class LabUniforms(
     val bScale: Float,
     val saturation: Float,
     /** 256x1 RGBA, four tone curves. Null means no curve, which the shader skips. */
+    /** `[highlights, shadows, whites, blacks]`, each -1..1. */
+    val ranges: FloatArray,
     val curveTex: ByteArray?,
     /** Tone curve blend. Zero also means "no curve bound". */
     val curveAmount: Float,
@@ -113,7 +115,8 @@ data class LabUniforms(
                     OverlayPlacement.rect(recipe.watermarkPosition, markAspect, OverlayPlacement.MARK_PAD, OverlayPlacement.MARK_PAD)
                 },
                 markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
-                curveTex = if (recipe.toneCurveActive) {
+                ranges = recipe.rangeArray(),
+            curveTex = if (recipe.toneCurveActive) {
                 ToneCurve.toRgba(ToneCurve.parseGroup(recipe.toneCurves))
             } else {
                 null

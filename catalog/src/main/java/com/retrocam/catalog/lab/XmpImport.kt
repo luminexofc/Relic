@@ -214,11 +214,24 @@ object XmpImport {
             add(key, v.take(24) + if (v.length > 24) "..." else "", "TONE CURVE", approx = true)
         }
 
+        // ---- the four range controls, XMP -100..100 mapped to -1..1 ----
+        val ranges = arrayOfNulls<Float>(4)
+        listOf(
+            Triple("Highlights2012", "Highlights", 0),
+            Triple("Shadows2012", "Shadows", 1),
+            Triple("Whites2012", "Whites", 2),
+            Triple("Blacks2012", "Blacks", 3),
+        ).forEach { (modernKey, legacyKey, slot) ->
+            val key = if (modern && modernKey in a) modernKey else legacyKey
+            val v = num(a[key]) ?: return@forEach
+            if (v == 0f) return@forEach
+            val m = (v / 100f).coerceIn(-1f, 1f)
+            ranges[slot] = m
+            add(key, q(v), "${legacyKey.uppercase()} = ${q(m)}")
+        }
+
         // ---- everything else, reported rather than silently dropped ----
-        for (k in listOf("Highlights2012", "Highlights")) drop(k, "range-specific, no knob")
-        for (k in listOf("Whites2012", "Whites")) drop(k, "range-specific, no knob")
-        for (k in listOf("Shadows2012", "Shadows")) drop(k, "range-specific, no knob")
-        for (k in listOf("Blacks2012", "Blacks")) drop(k, "range-specific, no knob")
+        for (k in listOf("AutoBrightness", "Auto Tone")) drop(k, "needs a scene analysis")
         for (k in listOf("Texture", "Clarity", "Dehaze")) drop(k, "local contrast, no analogue")
         for (k in listOf("GrainAmount", "PostCropVignetteAmount")) {
             drop(k, "units differ, no honest mapping")
@@ -248,6 +261,10 @@ object XmpImport {
                 gamma = gamma,
                 sharpen = sharpen,
                 toneCurves = if (anyCurve) ToneCurve.encodeGroup(curves.toList()) else ToneCurve.NONE,
+                highlights = ranges[0] ?: 0f,
+                shadows = ranges[1] ?: 0f,
+                whites = ranges[2] ?: 0f,
+                blacks = ranges[3] ?: 0f,
             ),
             applied = applied,
             ignored = ignored,
