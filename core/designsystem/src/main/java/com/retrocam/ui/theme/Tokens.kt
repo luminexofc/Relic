@@ -16,13 +16,14 @@ import androidx.compose.ui.unit.dp
  * runtime dependency.
  *
  * Values are the shadcn **dark** theme, whose palette is the Radix `neutral`
- * scale. Note what that costs: shadcn's dark primary is a near-white and there is
- * no accent hue, so RetroCam's retro orange is gone by design. The destructive
- * slot is the one saturated colour left, and it is deliberately reserved for
- * destructive actions.
+ * scale, with one deliberate departure: [Primary] is a Radix orange rather than
+ * shadcn's near-white. Reproducing that faithfully is right for a web app and
+ * wrong for a camera - with a near-white primary and no accent hue, every active
+ * state, slider fill, selected filter and record button became the same grey as
+ * the body text, and the app read as a wireframe of itself.
  *
- * If the result reads as too monochrome, swapping [Primary] to a Radix accent
- * scale (orange, blue, ...) is a one-line change here and nothing else moves.
+ * The destructive slot stays reserved for destructive actions, so orange is the
+ * only accent and it never has to mean "danger".
  */
 object ShadcnColor {
     /** Radix neutral 12. */
@@ -37,15 +38,25 @@ object ShadcnColor {
     /** Radix neutral 9. Also the border, input, muted, secondary and accent. */
     val Surface = Color(0xFF27272A)
 
-    /** Radix neutral 6. Also the focus ring. */
+    /** Radix neutral 6. */
     val Muted = Color(0xFF71717A)
 
     /**
-     * shadcn's dark primary is near-white with dark text on it. A button is
-     * therefore light-on-dark, not colour-on-dark.
+     * Radix orange 9, which is shadcn's own primary for its orange theme.
+     *
+     * shadcn's stock dark theme makes Primary near-white, which is a faithful
+     * reproduction and a lifeless one for a camera: every active state, slider
+     * fill, selected filter and record button became the same grey as the text,
+     * so the app lost the one thing that made it look like itself.
+     *
+     * The neutral surfaces stay Radix neutral, so the change is one colour
+     * rather than a new palette. Set this back to #FAFAFA to return to stock
+     * shadcn.
      */
-    val Primary = Color(0xFFFAFAFA)
-    val PrimaryForeground = Color(0xFF18181B)
+    val Primary = Color(0xFFFF8A3D)
+
+    /** Neutral 9. On orange 9 that is 6.3:1, so it clears AA for body text. */
+    val PrimaryForeground = Color(0xFF27272A)
 
     val Secondary = Color(0xFF27272A)
     val SecondaryForeground = Color(0xFFFAFAFA)
@@ -55,13 +66,14 @@ object ShadcnColor {
     val Accent = Color(0xFF27272A)
     val AccentForeground = Color(0xFFFAFAFA)
 
-    /** Radix red 9. The only saturated colour in the theme. */
+    /** Radix red 9. */
     val Destructive = Color(0xFFE5484D)
     val DestructiveForeground = Color(0xFFFAFAFA)
 
     val Border = Color(0xFF27272A)
     val Input = Color(0xFF27272A)
-    val Ring = Color(0xFF71717A)
+    /** Focus ring. Follows the accent, so keyboard focus is findable. */
+    val Ring = Primary
 }
 
 /**

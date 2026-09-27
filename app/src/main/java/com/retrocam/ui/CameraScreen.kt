@@ -754,38 +754,44 @@ private fun TopBar(
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
+        // Both buttons live in one Oriented block so the gap between them
+        // rotates with them. They used to be two sibling blocks with nothing
+        // between, which put the two icons hard against each other - and since
+        // the mirror only appears on the front camera, that was the one
+        // orientation where the cramped pair was visible at all.
         Oriented(rotation) {
-            if (showMirror) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (showMirror) {
+                    ShadcnButton(
+                        onClick = onMirror,
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        leading = {
+                            Icon(
+                                imageVector = Icons.Filled.Flip,
+                                contentDescription = "Mirror front camera",
+                                tint = if (mirrorOn) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        },
+                    )
+                    Spacer(Modifier.width(12.dp))
+                }
                 ShadcnButton(
-                    onClick = onMirror,
+                    onClick = onSettings,
                     variant = ButtonVariant.Ghost,
                     size = ButtonSize.Icon,
                     leading = {
                         Icon(
-                            imageVector = Icons.Filled.Flip,
-                            contentDescription = "Mirror front camera",
-                            tint = if (mirrorOn) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onBackground,
+                            imageVector = Icons.Filled.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.size(22.dp),
                         )
                     },
                 )
             }
-        }
-        Oriented(rotation) {
-            ShadcnButton(
-                onClick = onSettings,
-                variant = ButtonVariant.Ghost,
-                size = ButtonSize.Icon,
-                leading = {
-                    Icon(
-                        imageVector = Icons.Filled.Settings,
-                        contentDescription = "Settings",
-                        tint = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.size(22.dp),
-                    )
-                },
-            )
         }
     }
 }

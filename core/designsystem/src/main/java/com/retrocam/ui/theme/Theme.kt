@@ -8,10 +8,10 @@ import androidx.compose.ui.graphics.Color
 /**
  * The app's colour scheme, expressed as shadcn tokens.
  *
- * shadcn's dark theme is the Radix `neutral` scale, so the whole app shifts from
- * retro orange-on-near-black to a near-monochrome neutral. That is the "full
- * shadcn look" this was asked for; see [ShadcnColor] for the one-line way to put
- * a colour identity back.
+ * shadcn's dark theme is the Radix `neutral` scale, reproduced here faithfully.
+ * The one departure is [ShadcnColor.Primary], which is a Radix orange rather
+ * than shadcn's near-white, so the app keeps a colour identity; see there for
+ * why.
  *
  * Legacy names are kept as aliases because 15-odd call sites still read them, and
  * a name that no longer describes the value is worse than a slightly stale one.
