@@ -12,7 +12,11 @@ import android.os.SystemClock
 import android.util.Log
 import android.media.MediaRecorder
 import com.retrocam.catalog.FilterFamily
+import com.retrocam.catalog.FilterCatalog
 import com.retrocam.catalog.FilterSpec
+import com.retrocam.catalog.lab.LabMask
+import com.retrocam.catalog.lab.LabPrimitives
+import com.retrocam.catalog.lab.LabStage
 import com.retrocam.catalog.Shaders
 import com.retrocam.catalog.lab.LabUniforms
 import com.retrocam.catalog.lab.LutCatalog
@@ -68,6 +72,9 @@ class FilterRenderer(
         val uDuotone: Int,
         val uDuoShadow: Int,
         val uDuoHighlight: Int,
+        val uMaskRect: Int,
+        val uMaskShape: Int,
+        val uMaskFeather: Int,
         val uGamma: Int,
         val uSplitAmount: Int,
         val uShadowTint: Int,
@@ -113,7 +120,19 @@ class FilterRenderer(
     }
 
     /** One composer stage: filter + the intensity it runs at. */
-    data class ChainLink(val spec: FilterSpec, val intensity: Float)
+    /**
+     * One pass of the chain.
+     *
+     * [mask] limits the link to part of the frame. Null means the whole frame and
+     * leaves the shader's mask uniforms at zero, which the footer reads as FULL
+     * and multiplies by exactly 1.0 — so an unmasked link is bit-identical to a
+     * link from before masks existed.
+     */
+    data class ChainLink(
+        val spec: FilterSpec,
+        val intensity: Float,
+        val mask: LabMask? = null,
+    )
 
     /** Active composer chain (2-3 links) or null for single-filter mode. */
     @Volatile var chain: List<ChainLink>? = null
@@ -630,6 +649,9 @@ class FilterRenderer(
                 uDuotone = GLES20.glGetUniformLocation(p, "u_duotone"),
                 uDuoShadow = GLES20.glGetUniformLocation(p, "u_duoShadow"),
                 uDuoHighlight = GLES20.glGetUniformLocation(p, "u_duoHighlight"),
+                uMaskRect = GLES20.glGetUniformLocation(p, "u_maskRect"),
+                uMaskShape = GLES20.glGetUniformLocation(p, "u_maskShape"),
+                uMaskFeather = GLES20.glGetUniformLocation(p, "u_maskFeather"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
                 uSplitAmount = GLES20.glGetUniformLocation(p, "u_splitAmount"),
                 uShadowTint = GLES20.glGetUniformLocation(p, "u_shadowTint"),
@@ -660,6 +682,12 @@ class FilterRenderer(
     private var recipeSpec: FilterSpec? = null
     private var recipeIntensity = Float.NaN
     private var recipeLinksCache: List<ChainLink> = emptyList()
+    /**
+     * Stage list the cache was built from. Compared by value because the spec is
+     * rebuilt on every state change while the stage list usually is not, and
+     * rebuilding the chain means a catalog lookup and a spec copy per stage.
+     */
+    private var recipeStagesCache: List<LabStage> = emptyList()
 
     /**
      * The passes for a spec carrying a Filter Lab recipe: the base filter, then
@@ -675,19 +703,47 @@ class FilterRenderer(
     private fun recipeLinks(spec: FilterSpec, intensity: Float): List<ChainLink>? {
         val lab = spec.lab ?: return null
         if (lab.isIdentity) return null
-        if (spec !== recipeSpec || intensity != recipeIntensity) {
-            val stage = labStageSpec(spec)
+        val stages = lab.stagesClamped()
+        if (spec !== recipeSpec || intensity != recipeIntensity || stages != recipeStagesCache) {
             recipeSpec = spec
             recipeIntensity = intensity
-            recipeLinksCache = listOf(
+            recipeStagesCache = stages
+            recipeLinksCache = buildList {
                 // lab = null on the base link: its shader ignores the grade
                 // uniforms, and leaving the recipe on it would re-upload twelve
                 // floats per pass per frame for nothing.
-                ChainLink(spec.copy(lab = null), intensity),
-                ChainLink(stage, intensity),
-            )
+                add(ChainLink(spec.copy(lab = null), intensity))
+                add(ChainLink(labStageSpec(spec), intensity))
+                stages.forEach { st -> stageLink(st)?.let { add(it) } }
+            }
         }
         return recipeLinksCache
+    }
+
+    /**
+     * A catalog filter used as a chain link, with the stage's knobs folded into
+     * its parameters.
+     *
+     * `drawFullQuad` already uploads `spec.param1..3`, so the controls need no
+     * shader work at all — they are ordinary spec fields that happen to be
+     * user-editable per stage. Returns null for a primitive that is not in the
+     * catalog or is flagged unchainable, which drops the stage rather than
+     * rendering something wrong.
+     */
+    private fun stageLink(stage: LabStage): ChainLink? {
+        val prim = LabPrimitives.byId(stage.primitiveId) ?: return null
+        if (!prim.chainable) return null
+        val base = FilterCatalog.byId[stage.primitiveId] ?: return null
+        // Unset controls fall back to the catalog default, so adding a stage
+        // looks like the plain filter until a knob is actually moved.
+        val p1 = stage.params["1"] ?: base.param1
+        val p2 = stage.params["2"] ?: base.param2
+        val p3 = stage.params["3"] ?: base.param3
+        // A distinct id per param set would thrash the 40-entry program cache and
+        // force a recompile, so the cache key stays the filter id and the values
+        // ride on the uniforms instead.
+        val link = base.copy(param1 = p1, param2 = p2, param3 = p3, lab = null)
+        return ChainLink(link, stage.amountClamped, stage.maskClamped.takeIf { !it.isFull })
     }
 
     /**
@@ -832,6 +888,7 @@ class FilterRenderer(
         inputTexId: Int = 0,
         inputIsOES: Boolean = true,
         applyMirror: Boolean = true,
+        mask: LabMask? = null,
     ) {
         if (prog.id == 0) return
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
@@ -911,6 +968,19 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uDuotone, u.duotone)
             GLES20.glUniform3f(prog.uDuoShadow, u.duotoneShadow[0], u.duotoneShadow[1], u.duotoneShadow[2])
             GLES20.glUniform3f(prog.uDuoHighlight, u.duotoneHighlight[0], u.duotoneHighlight[1], u.duotoneHighlight[2])
+            // Only upload a real mask. Leaving these at zero is how an unmasked
+            // link stays a no-op: u_maskShape < 0.5 short-circuits maskFactor to
+            // 1.0 before it touches the rect.
+            if (mask != null && !mask.isFull) {
+                val m = LabMask.coerce(mask)
+                GLES20.glUniform4f(prog.uMaskRect, m.rect()[0], m.rect()[1], m.rect()[2], m.rect()[3])
+                GLES20.glUniform1f(prog.uMaskShape, m.shape.shaderCode)
+                GLES20.glUniform1f(prog.uMaskFeather, m.feather)
+            } else {
+                GLES20.glUniform4f(prog.uMaskRect, 0f, 0f, 1f, 1f)
+                GLES20.glUniform1f(prog.uMaskShape, 0f)
+                GLES20.glUniform1f(prog.uMaskFeather, 0f)
+            }
             GLES20.glUniform1f(prog.uGamma, u.gamma)
             GLES20.glUniform1f(prog.uSplitAmount, u.splitAmount)
             GLES20.glUniform3f(prog.uShadowTint, u.shadowTint[0], u.shadowTint[1], u.shadowTint[2])
@@ -1235,13 +1305,13 @@ class FilterRenderer(
             if (last && toScreen) {
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
                 GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
-                drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, w, h, time, readTex, readIsOES, true)
+                drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, w, h, time, readTex, readIsOES, true, link.mask)
                 return@forEachIndexed
             }
             val targetFbo = if (index % 2 == 0) pair.fboA else pair.fboB
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, targetFbo)
             GLES20.glViewport(0, 0, workW, workH)
-            drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, workW, workH, time, readTex, readIsOES, last)
+            drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, workW, workH, time, readTex, readIsOES, last, link.mask)
             readTex = if (index % 2 == 0) pair.texA else pair.texB
             readIsOES = false
         }

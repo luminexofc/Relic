@@ -60,6 +60,7 @@ import com.retrocam.ui.components.ShadcnInput
 import com.retrocam.ui.components.ShadcnLabel
 import com.retrocam.ui.components.ShadcnSlider
 import com.retrocam.ui.theme.AppType
+import com.retrocam.ui.theme.ShadcnRadius
 
 /**
  * Filter Lab. Composed *below* the live viewfinder rather than over it, so the
@@ -96,6 +97,18 @@ fun FilterLabPanel(
     onExtractPalette: () -> Unit,
     onApplyPaletteColour: (Int, Boolean) -> Unit,
     onSplitTint: (Boolean, Int) -> Unit,
+    onAddStage: (String) -> Unit,
+    onRemoveStage: (Int) -> Unit,
+    onMoveStage: (Int, Int) -> Unit,
+    onStageAmount: (Int, Float) -> Unit,
+    onStageParam: (Int, Int, Float) -> Unit,
+    onStageParamReset: (Int, Int) -> Unit,
+    onStageMaskShape: (Int) -> Unit,
+    onStageFeather: (Int, Float) -> Unit,
+    onStageMaskDrag: (Int, Float, Float, Float, Float) -> Unit,
+    onClearStages: () -> Unit,
+    selectedStage: Int,
+    onSelectStage: (Int) -> Unit,
     onShare: (String) -> Unit,
     onImportQr: () -> Unit,
     onDeleteLut: (String) -> Unit,
@@ -129,9 +142,28 @@ fun FilterLabPanel(
         ) {
             LabTab("BASIC", tab == 0, accent, Modifier.weight(1f)) { onTab(0) }
             LabTab("ADVANCED", tab == 1, accent, Modifier.weight(1f)) { onTab(1) }
+            LabTab("STAGES", tab == 2, accent, Modifier.weight(1f)) { onTab(2) }
         }
 
-        if (tab == 0) {
+        if (tab == 2) {
+            StageChain(
+                recipe = recipe,
+                accent = accent,
+                dim = dim,
+                onAdd = onAddStage,
+                onRemove = onRemoveStage,
+                onMove = onMoveStage,
+                onAmount = onStageAmount,
+                onParam = onStageParam,
+                onParamReset = onStageParamReset,
+                onMaskShape = onStageMaskShape,
+                onFeather = onStageFeather,
+                onMaskDrag = onStageMaskDrag,
+                onClear = onClearStages,
+                selected = selectedStage,
+                onSelect = onSelectStage,
+            )
+        } else if (tab == 0) {
             TemplateCarousel(recipe.templateId, accent, dim, onTemplate)
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
@@ -695,3 +727,174 @@ private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, o
     }
 }
 
+
+/**
+ * The stage chain editor: an ordered list of filters applied one after another on
+ * top of the colour grade, each with its own amount, knobs and area mask.
+ *
+ * Order is the whole point of a chain, so every row shows its position and can
+ * be moved rather than relying on insertion order to be obvious.
+ */
+@Composable
+private fun StageChain(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onAdd: (String) -> Unit,
+    onRemove: (Int) -> Unit,
+    onMove: (Int, Int) -> Unit,
+    onAmount: (Int, Float) -> Unit,
+    onParam: (Int, Int, Float) -> Unit,
+    onParamReset: (Int, Int) -> Unit,
+    onMaskShape: (Int) -> Unit,
+    onFeather: (Int, Float) -> Unit,
+    onMaskDrag: (Int, Float, Float, Float, Float) -> Unit,
+    onClear: () -> Unit,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val stages = recipe.stages
+    val full = stages.size >= com.retrocam.catalog.lab.LabRecipe.MAX_STAGES
+
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "STAGE CHAIN",
+            fontFamily = AppType.Sans, fontSize = 10.sp, color = dim,
+            modifier = Modifier.weight(1f),
+        )
+        if (stages.isNotEmpty()) {
+            ShadcnButton(
+                text = "Clear",
+                onClick = onClear,
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Sm,
+            )
+        }
+    }
+
+    if (full) {
+        Text(
+            "Chain is full at ${com.retrocam.catalog.lab.LabRecipe.MAX_STAGES} stages. " +
+                "Remove one to add another.",
+            fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+        )
+    }
+
+    stages.forEachIndexed { index, stage ->
+        val prim = com.retrocam.catalog.lab.LabPrimitives.byId(stage.primitiveId)
+        val isSel = index == selected
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .border(
+                    if (isSel) 2.dp else 1.dp,
+                    if (isSel) accent else dim.copy(alpha = 0.4f),
+                    RoundedCornerShape(ShadcnRadius.Lg),
+                )
+                .clickable { onSelect(index) }
+                .padding(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${index + 1}",
+                    fontFamily = AppType.Sans, fontSize = 10.sp, color = accent,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    prim?.displayName ?: stage.primitiveId,
+                    fontFamily = AppType.Sans, fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (prim != null) {
+                    Text(
+                        prim.context,
+                        fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            LabSlider(
+                "AMOUNT", stage.amountClamped, 0f, 1f, accent, dim, { onAmount(index, it) },
+            )
+
+            // A knob only appears once it has been set, so a freshly added stage is
+            // three lines long instead of showing every slider the filter could
+            // have. The catalog default is the starting point.
+            (prim?.controls ?: emptyList()).forEach { c ->
+                val set = stage.params[c.param.toString()]
+                if (set != null) {
+                    LabSlider(
+                        c.label, set, c.min, c.max, accent, dim,
+                        { onParam(index, c.param, it) },
+                        neutral = c.neutral,
+                        onReset = { onParamReset(index, c.param) },
+                    )
+                }
+            }
+            if (prim != null && prim.controls.any { !stage.params.containsKey(it.param.toString()) }) {
+                Text(
+                    "+ ${prim.controls.count { !stage.params.containsKey(it.param.toString()) }} more knob(s) — " +
+                        "reset to default to reveal",
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                )
+            }
+
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "AREA",
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                )
+                Spacer(Modifier.width(6.dp))
+                ShadcnButton(
+                    text = if (stage.maskClamped.isFull) "FULL FRAME" else stage.maskClamped.shape.name,
+                    onClick = { onMaskShape(index) },
+                    variant = ButtonVariant.Outline,
+                    size = ButtonSize.Sm,
+                )
+                Spacer(Modifier.width(6.dp))
+                if (!stage.maskClamped.isFull) {
+                    LabSlider(
+                        "FEATHER", stage.maskClamped.feather, 0f, 1f, accent, dim,
+                        { onFeather(index, it) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ShadcnButton(
+                    text = "Up", onClick = { onMove(index, -1) },
+                    variant = ButtonVariant.Ghost, size = ButtonSize.Sm,
+                    enabled = index > 0,
+                )
+                ShadcnButton(
+                    text = "Down", onClick = { onMove(index, 1) },
+                    variant = ButtonVariant.Ghost, size = ButtonSize.Sm,
+                    enabled = index < stages.lastIndex,
+                )
+                ShadcnButton(
+                    text = "Remove", onClick = { onRemove(index) },
+                    variant = ButtonVariant.Ghost, size = ButtonSize.Sm,
+                )
+            }
+        }
+    }
+
+    if (stages.isNotEmpty()) {
+        Text(
+            "Drag on the preview to set the area for stage ${selected + 1}. " +
+                "Tap a stage to select it.",
+            fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+        )
+    }
+
+    Spacer(Modifier.height(6.dp))
+    Text("ADD STAGE", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
+    com.retrocam.catalog.lab.LabPrimitives.chainable.forEach { p ->
+        ImportChip(p.displayName, dim) { onAdd(p.id) }
+    }
+}

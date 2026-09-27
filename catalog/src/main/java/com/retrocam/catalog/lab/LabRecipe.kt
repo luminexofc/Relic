@@ -78,13 +78,29 @@ data class LabRecipe(
      * written as "0" and never read.
      */
     val _reserved: String = "0",
+
+    /**
+     * Extra filter stages, applied in order after the colour grade.
+     *
+     * Capped at [MAX_STAGES] because every stage is a full-screen FBO pass on the
+     * live viewfinder, and each one costs a trip to the GPU on every frame. Four
+     * is the point past which a recipe is no longer something a person can look at
+     * and reason about, and a fifth would start dropping frames on a mid-range
+     * phone rather than just looking busy.
+     */
+    val stages: List<LabStage> = emptyList(),
 ) {
+    /** The stage list after clamping, which is what the renderer and codec both use. */
+    fun stagesClamped(): List<LabStage> = stages.take(MAX_STAGES).map {
+        it.copy(amount = it.amountClamped, mask = it.maskClamped)
+    }
+
     /** The template's 4x5 matrix, or null when there is no template. */
     fun templateMatrix(): FloatArray? = templateId?.let { LabTemplates.byId[it]?.matrix }
 
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
-        get() = templateId == null && adjustments.isNeutral && !hasEffects
+        get() = templateId == null && adjustments.isNeutral && !hasEffects && stages.isEmpty()
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -104,12 +120,22 @@ data class LabRecipe(
         if (splitAmount > 0f) add("split tone")
         if (!stampText.isNullOrBlank()) add("date stamp")
         if (watermarkId != null) add("watermark")
+        stages.take(MAX_STAGES).forEach { st ->
+            add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
+        }
     }
 
     /** True when a LUT is selected and switched on. */
     val lutActive: Boolean get() = lutId != null && lutAmount > 0f
 
     companion object {
+        /**
+         * Hard cap on chain length. Enforced in the recipe, the codec and the UI
+         * rather than in one place, because a cap that only the UI respects is not
+         * a cap — a shared recipe with nine stages would still have to render.
+         */
+        const val MAX_STAGES = 4
+
         /**
          * Duotone defaults match FilterEngine.applyDuotone's own fallbacks, so a
          * recipe that enables duotone without picking colours looks the same here
@@ -147,6 +173,7 @@ data class LabRecipe(
             splitAmount = r.splitAmount.coerceIn(0f, 1f),
             shadowTint = r.shadowTint,
             highlightTint = r.highlightTint,
+            stages = r.stagesClamped(),
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

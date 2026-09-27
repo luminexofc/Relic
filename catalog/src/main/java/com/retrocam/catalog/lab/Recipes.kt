@@ -98,7 +98,13 @@ data class SavedRecipe(
                 append(RecipeCodec.q(lab.stampAlpha)).append('|')
                 append(lab.watermarkId ?: "-").append('|')
                 append(RecipeCodec.q(lab.watermarkAlpha)).append('|')
-                append(lab.watermarkPosition.ordinal)
+                append(lab.watermarkPosition.ordinal).append('|')
+            append(lab.stagesClamped().joinToString("!") { st ->
+                st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
+                    st.maskClamped.toString() + '~' +
+                    st.params.entries.sortedBy { it.key }
+                        .joinToString(",") { "${it.key}=${RecipeCodec.q(it.value)}" }
+            })
             }
             return ID_PREFIX + fnv1a(canonical).toString(36)
         }
@@ -134,10 +140,10 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 5
+    const val VERSION = 6
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 31
+    private const val FIELD_COUNT = 32
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -166,7 +172,81 @@ object RecipeCodec {
             // Reserved slot, so the next version can append a field without
             // reinterpreting every payload already out there.
             "0",
+            encodeStages(lab.stages),
         ).joinToString(SEP)
+    }
+
+    /**
+     * The stage chain as a single comma-free field.
+     *
+     * A stage is `id~amount~shape~x~y~w~h~feather~p1-p2-p3` and stages are joined
+     * with `!`. Tilde and bang are both absent from every other field, so this
+     * cannot break the comma split, and a variable-length list stays one field
+     * rather than blowing up [FIELD_COUNT] by forty.
+     *
+     * Params are written as `paramNumber=value` joined by `+` rather than
+     * positionally. Positional encoding looks shorter and is ambiguous: a stage
+     * that sets only param 2 would decode that value onto param 1, because
+     * `controls[0]` is the param-1 knob of some filters and the param-2 knob of
+     * others. Naming the number costs six characters and is never wrong.
+     */
+    private fun encodeStages(stages: List<LabStage>): String {
+        if (stages.isEmpty()) return "-"
+        return stages.take(LabRecipe.MAX_STAGES).joinToString("!") { st ->
+            val m = st.maskClamped
+            val p = st.params
+            val params = p.entries.sortedBy { it.key }
+                .joinToString("+") { "${it.key}=${q(it.value)}" }
+            listOf(
+                st.primitiveId,
+                q(st.amountClamped),
+                m.shape.ordinal.toString(),
+                q(m.x), q(m.y), q(m.width), q(m.height), q(m.feather),
+                params,
+            ).joinToString("~")
+        }
+    }
+
+    /**
+     * Inverse of [encodeStages]. A malformed stage is dropped rather than failing
+     * the whole payload: a shared recipe with one bad stage should still restore
+     * its grade, LUT and overlays, since those are the parts a person would miss.
+     */
+    private fun decodeStages(raw: String): List<LabStage> {
+        if (raw == "-") return emptyList()
+        return raw.split('!').take(LabRecipe.MAX_STAGES).mapNotNull { tok ->
+            val f = tok.split('~')
+            if (f.size != 9) return@mapNotNull null
+            val prim = LabPrimitives.byId(f[0]) ?: return@mapNotNull null
+            if (!prim.chainable) return@mapNotNull null
+            val shape = MaskShape.entries.getOrNull(f[2].toIntOrNull() ?: 0)
+                ?: return@mapNotNull null
+            val params = buildMap {
+                if (f[8].isNotEmpty()) {
+                    f[8].split('+').forEach { kv ->
+                        val k = kv.substringBefore('=')
+                        // Only a real u_paramN slot, so a hand-edited payload
+                        // cannot invent a fourth knob.
+                        if (k.toIntOrNull() !in 1..3) return@forEach
+                        val n = kv.substringAfter('=', "").toFloatOrNull() ?: return@forEach
+                        put(k, n)
+                    }
+                }
+            }
+            runCatching {
+                LabStage(
+                    primitiveId = prim.id,
+                    amount = f[1].toFloat(),
+                    params = params,
+                    mask = LabMask(
+                        shape = shape,
+                        x = f[3].toFloat(), y = f[4].toFloat(),
+                        width = f[5].toFloat(), height = f[6].toFloat(),
+                        feather = f[7].toFloat(),
+                    ),
+                )
+            }.getOrNull()
+        }
     }
 
     /** Returns null for anything malformed, so a bad scan can never crash the app. */
@@ -217,6 +297,7 @@ object RecipeCodec {
                     // Unused today, reserved so a future field can be appended
                     // without reinterpreting every existing payload.
                     _reserved = parts[30],
+                    stages = decodeStages(parts[31]),
                 ),
             )
             SavedRecipe(

@@ -45,6 +45,13 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.IntSize
+import com.retrocam.catalog.lab.LabMask
 import android.opengl.GLSurfaceView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,6 +90,18 @@ fun LabScreen(viewModel: CameraViewModel) {
     var texture by remember { mutableStateOf<SurfaceTexture?>(null) }
     val renderer = remember { FilterRenderer(onTextureReady = { texture = it }) }
     var glView by remember { mutableStateOf<GLSurfaceView?>(null) }
+    /**
+     * Which stage the viewfinder drag and the area controls act on.
+     *
+     * Without this the picker has nothing to point at: a freshly added stage has
+     * a full-frame mask, so "the first stage that is not full frame" would be
+     * nobody and the mask could never be drawn in the first place.
+     */
+    var selectedStage by remember { mutableStateOf(0) }
+    // Clamped on every read: removing a stage can leave the selection past the
+    // end, and an out-of-range index would silently do nothing.
+    val stageIndex = selectedStage
+        .coerceIn(0, (state.labRecipe.stages.size - 1).coerceAtLeast(0))
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val watermarks by viewModel.watermarks.collectAsStateWithLifecycle()
 
@@ -202,6 +221,24 @@ fun LabScreen(viewModel: CameraViewModel) {
                     }
                 },
         ) {
+            // ---- area mask picker ----
+            // A drag over the preview sets the selected stage's mask, and the
+            // outline is drawn on top so what you are selecting is visible while
+            // the filter runs underneath it. The drag only arms once a stage is
+            // selected, otherwise every tap on the viewfinder would start moving
+            // a mask nobody asked for.
+            MaskPicker(
+                enabled = stageIndex >= 0,
+                mask = stageIndex.takeIf { it >= 0 }
+                    ?.let { state.labRecipe.stages[it].maskClamped },
+                onDrag = { x0, y0, x1, y1 ->
+                    stageIndex.takeIf { it >= 0 }?.let {
+                        viewModel.setLabStageMaskFromDrag(it, x0, y0, x1, y1)
+                    }
+                },
+                modifier = Modifier.matchParentSize(),
+            )
+
             AndroidView(
                 factory = { ctx ->
                     GLSurfaceView(ctx).apply {
@@ -263,6 +300,18 @@ fun LabScreen(viewModel: CameraViewModel) {
             onExtractPalette = viewModel::extractPalette,
             onApplyPaletteColour = viewModel::applyPaletteColour,
             onSplitTint = viewModel::setLabSplitTint,
+            onAddStage = viewModel::addLabStage,
+            onRemoveStage = viewModel::removeLabStage,
+            onMoveStage = viewModel::moveLabStage,
+            onStageAmount = viewModel::setLabStageAmount,
+            onStageParam = viewModel::setLabStageParam,
+            onStageParamReset = viewModel::resetLabStageParam,
+            onStageMaskShape = viewModel::cycleLabStageMaskShape,
+            onStageFeather = viewModel::setLabStageFeather,
+            onStageMaskDrag = viewModel::setLabStageMaskFromDrag,
+            onClearStages = viewModel::clearLabStages,
+            selectedStage = stageIndex,
+            onSelectStage = { selectedStage = it },
             onShare = viewModel::shareRecipe,
             onImportQr = { qrPicker.launch("image/*") },
             onDeleteLut = viewModel::deleteLut,
@@ -274,5 +323,105 @@ fun LabScreen(viewModel: CameraViewModel) {
             onEdit = viewModel::editLabRecipe,
             onDelete = viewModel::deleteLabRecipe,
         )
+    }
+}
+
+/**
+ * Draws a stage's area mask over the live preview and turns a drag into one.
+ *
+ * Frame uv has y growing upward, the same way the shader sees it, so the flip
+ * here is the only place the two coordinate systems meet. Getting it wrong
+ * produces a mask mirrored top-to-bottom from the one the user drew, which is
+ * the easiest way to make the whole feature look broken.
+ */
+@Composable
+private fun MaskPicker(
+    enabled: Boolean,
+    mask: LabMask?,
+    onDrag: (Float, Float, Float, Float) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    // Held in local state while dragging so the outline tracks the finger, then
+    // handed to the view model on release. Writing straight to the recipe would
+    // round-trip through the renderer on every pointer move.
+    // Start and current, both in frame uv. Building the rect from the two is the
+    // whole job: storing only a corner and a size means a drag back over itself
+    // would need signed extents, which LabMask deliberately does not accept.
+    var anchor by remember { mutableStateOf<Offset?>(null) }
+    var cursor by remember { mutableStateOf<Offset?>(null) }
+
+    val shape = mask?.shape ?: com.retrocam.catalog.lab.MaskShape.RECT
+    val feather = mask?.feather ?: 0f
+
+    Box(
+        modifier
+            .onSizeChanged { size = it }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                fun toUv(p: Offset): Offset {
+                    val w = size.width.toFloat()
+                    val h = size.height.toFloat()
+                    if (w <= 0f || h <= 0f) return Offset(0f, 0f)
+                    return Offset(
+                        (p.x / w).coerceIn(0f, 1f),
+                        (1f - p.y / h).coerceIn(0f, 1f),
+                    )
+                }
+                detectDragGestures(
+                    onDragStart = { anchor = toUv(it); cursor = toUv(it) },
+                    onDrag = { change, _ ->
+                        change.consume()
+                        cursor = toUv(change.position)
+                    },
+                    onDragEnd = {
+                        val a = anchor
+                        val c = cursor
+                        if (a != null && c != null) {
+                            onDrag(
+                                minOf(a.x, c.x), minOf(a.y, c.y),
+                                maxOf(a.x, c.x), maxOf(a.y, c.y),
+                            )
+                        }
+                        anchor = null
+                        cursor = null
+                    },
+                    onDragCancel = { anchor = null; cursor = null },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        val a = anchor
+        val c = cursor
+        val shown = if (a != null && c != null) {
+            LabMask(
+                shape = shape,
+                x = minOf(a.x, c.x), y = minOf(a.y, c.y),
+                width = kotlin.math.abs(c.x - a.x), height = kotlin.math.abs(c.y - a.y),
+                feather = feather,
+            )
+        } else {
+            mask
+        }
+        if (enabled && shown != null && !shown.isFull) {
+            Canvas(Modifier.matchParentSize()) {
+                val r = shown.rect()
+                val w = size.width.toFloat()
+                val h = size.height.toFloat()
+                fun px(u: Float) = u * w
+                fun py(v: Float) = (1f - v) * h
+                val tl = Offset(px(r[0]), py(r[3]))
+                val br = Offset(px(r[2]), py(r[1]))
+                drawRect(
+                    color = Color.White,
+                    topLeft = tl,
+                    size = androidx.compose.ui.geometry.Size(
+                        (br.x - tl.x).coerceAtLeast(1f),
+                        (br.y - tl.y).coerceAtLeast(1f),
+                    ),
+                    style = Stroke(width = 2f),
+                )
+            }
+        }
     }
 }

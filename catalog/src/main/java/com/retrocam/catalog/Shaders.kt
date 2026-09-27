@@ -65,6 +65,13 @@ object Shaders {
 
         // Filter Lab colour correction that a 4x5 matrix cannot express: a power
         // curve and a luminance-keyed split tone.
+        // Area mask. Shape 0 is FULL and must evaluate to exactly 1.0, because the
+        // footer multiplies every filter's intensity by this: any other value would
+        // quietly dim all 41 built-in filters.
+        uniform vec4 u_maskRect;   // x0, y0, x1, y1 in frame uv
+        uniform float u_maskShape; // 0 full, 1 rect, 2 ellipse, 3 band h, 4 band v
+        uniform float u_maskFeather;
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -158,12 +165,45 @@ object Shaders {
             ditherCoord = floor(px / blockCell);
             return sampleSrc(centerPx / u_resolution).rgb;
         }
+        // How much of this stage's effect applies at uv: 1 inside the mask, 0
+        // outside, feathered in between. Frame y grows upward, which the band
+        // shortcuts rely on. Shape 0 returns a literal 1.0 so the multiply in the
+        float maskFactor(vec2 uv) {
+        // for any filter that is not being masked.
+        if (u_maskShape < 0.5) return 1.0;
+        vec2 c = (u_maskRect.xy + u_maskRect.zw) * 0.5;
+        vec2 h = (u_maskRect.zw - u_maskRect.xy) * 0.5;
+        if (h.x <= 0.0 || h.y <= 0.0) return 1.0;
+
+        if (u_maskShape < 1.5) {
+        // Rect: distance to the box, normalised by the half-extent.
+        vec2 d = abs(uv - c) - h;
+        float outside = length(max(d, 0.0));
+        return clamp(1.0 - outside / max(u_maskFeather, 1e-4), 0.0, 1.0);
+        }
+        if (u_maskShape < 2.5) {
+        // Ellipse: normalised radius, aspect handled by the half-extent.
+        vec2 d = (uv - c) / h;
+        return clamp(1.0 - (length(d) - 1.0) / max(u_maskFeather, 1e-4), 0.0, 1.0);
+        }
+        // Bands: a strip across the frame. h is unused, so the band is defined by
+        // the rect's thickness rather than its position, which is what makes a
+        // "horizon" style effect usable.
+        if (u_maskShape < 3.5) {
+        float t = abs(uv.y - c.y) / h.y;
+        return clamp(1.0 - (t - 1.0) / max(u_maskFeather, 1e-4), 0.0, 1.0);
+        }
+        float t = abs(uv.x - c.x) / h.x;
+        return clamp(1.0 - (t - 1.0) / max(u_maskFeather, 1e-4), 0.0, 1.0);
+        }
+
     """
 
     const val FOOTER = """
         void main() {
             vec4 src = sampleSrc(vFrameCoord);
-            gl_FragColor = mix(src, applyFilter(src, vFrameCoord), u_intensity);
+            float m = maskFactor(vFrameCoord);
+            gl_FragColor = mix(src, applyFilter(src, vFrameCoord), u_intensity * m);
         }
     """
 

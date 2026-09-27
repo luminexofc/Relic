@@ -14,6 +14,11 @@ import com.retrocam.camera.CameraController
 import com.retrocam.catalog.FilterCatalog
 import com.retrocam.catalog.FilterSpec
 import com.retrocam.catalog.lab.DateStamp
+import com.retrocam.catalog.lab.LabMask
+import com.retrocam.catalog.lab.LabRecipe
+import com.retrocam.catalog.lab.LabPrimitives
+import com.retrocam.catalog.lab.LabStage
+import com.retrocam.catalog.lab.MaskShape
 import com.retrocam.catalog.lab.withEffect
 import com.uvstudio.him.photofilterlibrary.FilterEngine
 import com.retrocam.data.SettingsRepository
@@ -758,6 +763,134 @@ class CameraViewModel @Inject constructor(
                 ),
             )
         }
+    }
+
+    // ---- stage chain ----
+
+    private fun withStages(
+        index: Int,
+        f: (List<LabStage>) -> List<LabStage>,
+    ) = _uiState.update { s ->
+        val cur = s.labRecipe.stages
+        val next = f(cur)
+        // The cap is enforced here as well as in the recipe, so the UI cannot
+        // build a five-stage chain that the renderer would then silently drop.
+        s.copy(labRecipe = s.labRecipe.copy(stages = next.take(LabRecipe.MAX_STAGES)))
+    }
+
+    /** Appends a stage on its catalog defaults, if there is room. */
+    fun addLabStage(primitiveId: String) {
+        val prim = LabPrimitives.byId(primitiveId) ?: return
+        if (!prim.chainable) return
+        pendingSelectedRecipe = null
+        withStages(-1) { it + LabStage(primitiveId) }
+    }
+
+    fun removeLabStage(index: Int) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur -> cur.filterIndexed { i, _ -> i != index } }
+    }
+
+    /** Moves a stage by one slot. Out-of-range moves are ignored, not clamped. */
+    fun moveLabStage(index: Int, delta: Int) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            val to = index + delta
+            if (index !in cur.indices || to !in cur.indices) return@withStages cur
+            cur.toMutableList().apply { add(to, removeAt(index)) }
+        }
+    }
+
+    fun setLabStageAmount(index: Int, amount: Float) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            cur.mapIndexed { i, st ->
+                if (i == index) st.copy(amount = amount.coerceIn(0f, 1f)) else st
+            }
+        }
+    }
+
+    /**
+     * Moves one of a stage's named knobs.
+     *
+     * [param] is a shader parameter number, not a control index, because a
+     * primitive's controls do not always start at param 1.
+     */
+    fun setLabStageParam(index: Int, param: Int, value: Float) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            cur.mapIndexed { i, st ->
+                if (i == index) {
+                    st.copy(params = st.params + (param.toString() to value))
+                } else {
+                    st
+                }
+            }
+        }
+    }
+
+    /** Clears one knob so the stage falls back to the catalog default. */
+    fun resetLabStageParam(index: Int, param: Int) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            cur.mapIndexed { i, st ->
+                if (i == index) st.copy(params = st.params - param.toString()) else st
+            }
+        }
+    }
+
+    fun setLabStageMask(index: Int, mask: LabMask) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            cur.mapIndexed { i, st -> if (i == index) st.copy(mask = mask) else st }
+        }
+    }
+
+    /**
+     * Sets a stage's mask from a drag on the viewfinder.
+     *
+     * [uv] is in frame coordinates with y already flipped to point up, matching
+     * what the shader sees, so a mask drawn to look right on screen is the same
+     * mask the shader applies. Getting that flip wrong is the single easiest way
+     * to end up with a mask that mirrors the one the user drew.
+     */
+    fun setLabStageMaskFromDrag(index: Int, x0: Float, y0: Float, x1: Float, y1: Float) {
+        val shape = _uiState.value.labRecipe.stages.getOrNull(index)?.mask?.shape
+            ?: MaskShape.RECT
+        setLabStageMask(
+            index,
+            LabMask(
+                shape = shape,
+                x = minOf(x0, x1), y = minOf(y0, y1),
+                width = kotlin.math.abs(x1 - x0), height = kotlin.math.abs(y1 - y0),
+                feather = _uiState.value.labRecipe.stages[index].mask.feather,
+            ),
+        )
+    }
+
+    fun cycleLabStageMaskShape(index: Int) {
+        pendingSelectedRecipe = null
+        withStages(index) { cur ->
+            cur.mapIndexed { i, st ->
+                if (i != index) {
+                    st
+                } else {
+                    // Cycling rather than a list, so the control is one button.
+                    val next = MaskShape.entries[(st.mask.shape.ordinal + 1) % MaskShape.entries.size]
+                    st.copy(mask = st.mask.copy(shape = next))
+                }
+            }
+        }
+    }
+
+    fun setLabStageFeather(index: Int, feather: Float) {
+        val st = _uiState.value.labRecipe.stages.getOrNull(index) ?: return
+        setLabStageMask(index, st.mask.copy(feather = feather.coerceIn(0f, 1f)))
+    }
+
+    fun clearLabStages() {
+        pendingSelectedRecipe = null
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(stages = emptyList())) }
     }
 
     fun resetLabKnobs() {
