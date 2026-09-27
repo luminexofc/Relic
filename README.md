@@ -63,7 +63,7 @@ The visual targets the shaders were tuned against:
 - Stills as **JPEG or PNG**
 - Video to **MP4** — a `MediaRecorder` fed by the renderer's EGL surface, H.264 at 30 fps / 10 Mbps, up to 1920 px on the long edge, with optional AAC microphone audio. The file is inserted into MediaStore as `IS_PENDING` and only published once the encoder stops, so a failed take never leaves a zero-byte video behind
 - **Custom save folder** — pick any folder with the system picker; the chosen tree is mapped onto MediaStore's `RELATIVE_PATH`
-- Photo cards: the shot baked onto a paper mat with a caption strip (header, title, details) via `android.graphics`
+- Photo cards: the shot centre-cropped into a rounded window on a paper card, with a caption bar beneath it (header, title, details), drawn via `android.graphics`
 - Gallery that reads the configured save folder back out of MediaStore
 
 **Interface**
