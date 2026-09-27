@@ -74,6 +74,10 @@ fun FilterLabPanel(
     onResetAll: () -> Unit,
     onEffect: (Int, Float) -> Unit,
     onDuoColour: (Boolean, Int) -> Unit,
+    luts: List<LutStore.Entry>,
+    onPickLut: (String) -> Unit,
+    onImportLut: () -> Unit,
+    onLutAmount: (Float) -> Unit,
     onIntensity: (Float) -> Unit,
     onSave: () -> Unit,
     onEdit: (String) -> Unit,
@@ -162,6 +166,36 @@ fun FilterLabPanel(
             }
             if (recipe.duotone > 0f) {
                 DuotoneColours(recipe, accent, dim, onDuoColour)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("3D LUT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            if (recipe.lutId != null) {
+                LabSlider(
+                    "LUT AMOUNT", recipe.lutAmount, 0f, 1f, accent, dim,
+                    onLutAmount,
+                    neutral = 1f,
+                    onReset = { onLutAmount(1f) },
+                )
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(luts, key = { it.id }) { e ->
+                    TemplateChip(
+                        e.displayName,
+                        recipe.lutId == e.id,
+                        accent,
+                        dim,
+                    ) { onPickLut(e.id) }
+                }
+                item {
+                    Box(
+                        Modifier
+                            .border(1.dp, dim.copy(alpha = 0.5f), RoundedCornerShape(50))
+                            .clickable(onClick = onImportLut)
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) {
+                        Text("+ IMPORT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+                    }
+                }
             }
         }
 

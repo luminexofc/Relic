@@ -14,6 +14,7 @@ import android.media.MediaRecorder
 import com.retrocam.catalog.FilterSpec
 import com.retrocam.catalog.Shaders
 import com.retrocam.catalog.lab.LabUniforms
+import com.retrocam.catalog.lab.LutCatalog
 import com.retrocam.catalog.lab.LabRecipe
 import com.retrocam.catalog.lab.LabShaderSpec
 import java.nio.ByteBuffer
@@ -67,6 +68,10 @@ class FilterRenderer(
         val uDuotone: Int,
         val uDuoShadow: Int,
         val uDuoHighlight: Int,
+        val uLut: Int,
+        val uLutAmount: Int,
+        val uLutCube: Int,
+        val uLutGrid: Int,
         val aPosition: Int,
         val aTexCoord: Int,
     )
@@ -316,6 +321,13 @@ class FilterRenderer(
         thumbSize = 0
         oesTextureId = -1
         glyphTexId = 0
+        // Fresh GL context: every cached GL id, LUT textures included, belonged
+        // to a dead context. The app re-queues them.
+        if (labLuts.isNotEmpty()) {
+            GLES20.glDeleteTextures(labLuts.size, labLuts.values.toIntArray(), 0)
+            labLuts.clear()
+            lutCubes.clear()
+        }
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -343,6 +355,7 @@ class FilterRenderer(
         val frameStart = SystemClock.elapsedRealtimeNanos()
         surfaceTexture?.updateTexImage()
         drainVideoOps()
+        drainLabOps()
         val links = chain?.takeIf { it.size >= 1 }
         if (links != null) {
             renderChain(links, surfaceWidth, surfaceHeight, toScreen = true)
@@ -365,6 +378,71 @@ class FilterRenderer(
         drainThumbnails()
         drainCaptures()
         frameMs = frameMs * 0.9f + (SystemClock.elapsedRealtimeNanos() - frameStart) / 1_000_000f * 0.1f
+    }
+
+    /**
+     * Filter Lab LUT textures, keyed by recipe-visible id. Owned here rather than
+     * in the UI because they are GL objects and must be re-created after a
+     * context loss, same as every other handle in this class.
+     */
+    private val labLuts = LinkedHashMap<String, Int>()
+    private val lutCubes = HashMap<String, Int>()
+
+    /**
+     * Uploads (or replaces) a LUT. [pixels] is a row-major Hald image, [side] its
+     * width and height, [cube] the cube edge (16 or 64).
+     *
+     * Must be called on the GL thread; the UI hands the work over via
+     * [queueLutUpload].
+     */
+    fun uploadLut(id: String, pixels: IntArray, side: Int, cube: Int) {
+        labLuts[id]?.let { GLES20.glDeleteTextures(1, intArrayOf(it), 0) }
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = java.nio.ByteBuffer
+            .allocateDirect(side * side * 4)
+            .order(java.nio.ByteOrder.nativeOrder())
+        for (p in pixels) {
+            buf.put(((p shr 16) and 0xFF).toByte())
+            buf.put(((p shr 8) and 0xFF).toByte())
+            buf.put((p and 0xFF).toByte())
+            buf.put(0xFF.toByte())
+        }
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, side, side, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf,
+        )
+        // NEAREST matches upstream, which indexes the CLUT with integer
+        // arithmetic and no interpolation.
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        labLuts[id] = tex[0]
+        lutCubes[id] = cube
+    }
+
+    fun hasLut(id: String): Boolean = labLuts.containsKey(id)
+
+    private sealed interface LabOp {
+        data class Upload(val id: String, val pixels: IntArray, val side: Int, val cube: Int) : LabOp
+    }
+
+    private val labQueue = java.util.concurrent.ConcurrentLinkedQueue<LabOp>()
+
+    /** Queues a LUT upload onto the GL thread. Safe to call from the main thread. */
+    fun queueLutUpload(id: String, pixels: IntArray, side: Int, cube: Int) {
+        labQueue.add(LabOp.Upload(id, pixels, side, cube))
+    }
+
+    private fun drainLabOps() {
+        while (true) {
+            when (val op = labQueue.poll() ?: return) {
+                is LabOp.Upload -> uploadLut(op.id, op.pixels, op.side, op.cube)
+            }
+        }
     }
 
     fun release() {
@@ -397,6 +475,11 @@ class FilterRenderer(
         if (glyphTexId != 0) {
             GLES20.glDeleteTextures(1, intArrayOf(glyphTexId), 0)
             glyphTexId = 0
+        }
+        if (labLuts.isNotEmpty()) {
+            GLES20.glDeleteTextures(labLuts.size, labLuts.values.toIntArray(), 0)
+            labLuts.clear()
+            lutCubes.clear()
         }
     }
 
@@ -455,6 +538,10 @@ class FilterRenderer(
                 uDuotone = GLES20.glGetUniformLocation(p, "u_duotone"),
                 uDuoShadow = GLES20.glGetUniformLocation(p, "u_duoShadow"),
                 uDuoHighlight = GLES20.glGetUniformLocation(p, "u_duoHighlight"),
+                uLut = GLES20.glGetUniformLocation(p, "u_lut"),
+                uLutAmount = GLES20.glGetUniformLocation(p, "u_lutAmount"),
+                uLutCube = GLES20.glGetUniformLocation(p, "u_lutCube"),
+                uLutGrid = GLES20.glGetUniformLocation(p, "u_lutGrid"),
                 // Cached once: glGetAttribLocation per draw was a driver query
                 // on every pass of every frame.
                 aPosition = GLES20.glGetAttribLocation(p, "aPosition"),
@@ -693,6 +780,21 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uDuotone, u.duotone)
             GLES20.glUniform3f(prog.uDuoShadow, u.duotoneShadow[0], u.duotoneShadow[1], u.duotoneShadow[2])
             GLES20.glUniform3f(prog.uDuoHighlight, u.duotoneHighlight[0], u.duotoneHighlight[1], u.duotoneHighlight[2])
+            // A recipe naming a LUT we do not hold (someone else's recipe, or an
+            // import we have not downloaded) still grades: amount stays 0 and the
+            // rest of the recipe works.
+            val lutId = lab.lutId
+            val lutTex = if (lutId != null) labLuts[lutId] else null
+            if (lutTex != null && prog.uLut != -1) {
+                GLES20.glUniform1f(prog.uLutAmount, if (lab.lutActive) u.lutAmount else 0f)
+                GLES20.glUniform1f(prog.uLutCube, lutCubes[lutId]?.toFloat() ?: 64f)
+                GLES20.glUniform1f(prog.uLutGrid, LutCatalog.gridFor(lutCubes[lutId] ?: 64).toFloat())
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE4)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTex)
+                GLES20.glUniform1i(prog.uLut, 4)
+            } else if (prog.uLutAmount != -1) {
+                GLES20.glUniform1f(prog.uLutAmount, 0f)
+            }
         }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         if (inputIsOES) {

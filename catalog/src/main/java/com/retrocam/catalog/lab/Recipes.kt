@@ -40,6 +40,7 @@ data class SavedRecipe(
                 lab.templateId?.lowercase()?.replace('_', ' '),
                 lab.adjustments.describe().takeIf { it != "no grading" },
                 lab.activeEffects().takeIf { it.isNotEmpty() }?.joinToString(" "),
+                lab.lutId?.removePrefix("lut_")?.take(6),
                 "over ${base.displayName}",
             ).joinToString(", "),
             lab = lab,
@@ -83,7 +84,9 @@ data class SavedRecipe(
                 append(RecipeCodec.q(lab.glitch)).append(',')
                 append(RecipeCodec.q(lab.duotone)).append(',')
                 append(lab.duotoneShadow).append(',')
-                append(lab.duotoneHighlight)
+                append(lab.duotoneHighlight).append('|')
+                append(lab.lutId ?: "-").append(',')
+                append(RecipeCodec.q(lab.lutAmount))
             }
             return ID_PREFIX + fnv1a(canonical).toString(36)
         }
@@ -118,11 +121,11 @@ data class SavedRecipe(
  */
 object RecipeCodec {
 
-    /** Bumped when the field list changes. v2 added the six effect amounts and the duotone pair. */
-    const val VERSION = 2
+    /** Bumped when the field list changes. v2 added effects, v3 added the LUT pair. */
+    const val VERSION = 3
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 17
+    private const val FIELD_COUNT = 19
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -138,6 +141,7 @@ object RecipeCodec {
             q(a.brightness), q(a.contrast), q(a.saturation), q(a.warmth), q(a.tint),
             q(lab.vignette), q(lab.grain), q(lab.sharpen), q(lab.blur), q(lab.glitch), q(lab.duotone),
             r.lab.duotoneShadow.toString(), r.lab.duotoneHighlight.toString(),
+            r.lab.lutId ?: "-", q(lab.lutAmount),
         ).joinToString(SEP)
     }
 
@@ -167,6 +171,8 @@ object RecipeCodec {
                     duotone = parts[14].toFloat(),
                     duotoneShadow = parts[15].toInt(),
                     duotoneHighlight = parts[16].toInt(),
+                    lutId = parts[17].takeIf { it != "-" },
+                    lutAmount = parts[18].toFloat(),
                 ),
             )
             SavedRecipe(

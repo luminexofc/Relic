@@ -77,6 +77,8 @@ data class CameraUiState(
     val labIntensity: Float = 1f,
     /** Saved recipes, newest last. Recipes whose base filter is gone are dropped. */
     val labRecipes: List<com.retrocam.catalog.lab.SavedRecipe> = emptyList(),
+    /** Bumped when the set of available LUTs changes, to re-read the list. */
+    val labLutTick: Int = 0,
     val zoomRatio: Float = 1f,
     val mode: String = "photo",
     val recording: Boolean = false,
@@ -115,6 +117,12 @@ class CameraViewModel @Inject constructor(
     private var persistJob: Job? = null
     private var sizePersistJob: Job? = null
     private var detailPersistJob: Job? = null
+
+    /**
+     * Created lazily: it touches filesDir, and the property has to be declared
+     * before the [init] block that used to assign it.
+     */
+    private val lutStore: LutStore by lazy { LutStore(context) }
 
     init {
         Feedback.ensureSoundLoaded()
@@ -407,6 +415,59 @@ class CameraViewModel @Inject constructor(
         _uiState.update { it.copy(labRecipe = it.labRecipe.withEffect(which, value)) }
     }
 
+    // ---- Filter Lab LUTs ----
+
+    /**
+     * Every LUT the Lab can offer: the generated built-ins plus anything the user
+     * has imported. Re-read whenever the Lab opens, since importing happens
+     * outside this ViewModel's flow.
+     */
+    fun labLuts(): List<com.retrocam.ui.LutStore.Entry> {
+        return lutStore.all()
+    }
+
+    fun setLabLut(id: String?) {
+        _uiState.update {
+            it.copy(
+                labRecipe = it.labRecipe.copy(
+                    lutId = id,
+                    // Selecting a LUT turns it on at full strength, which is what
+                    // picking a colour normally means.
+                    lutAmount = if (id == null) 0f else 1f,
+                ),
+            )
+        }
+    }
+
+    fun setLabLutAmount(value: Float) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(lutAmount = value.coerceIn(0f, 1f))) }
+    }
+
+    /**
+     * Imports a Hald PNG, then makes sure the renderer has its pixels.
+     *
+     * The renderer owns the GL texture, so a LUT selected later in the session
+     * still has to be uploaded; [syncRenderer] re-uploads whatever the current
+     * recipe needs, and this covers the rest by uploading on selection.
+     */
+    fun importLut(uri: android.net.Uri, renderer: FilterRenderer?) {
+        val r = lutStore.import(uri)
+        val entry = r.getOrNull()
+        if (entry == null) {
+            Feedback.error(context)
+            return
+        }
+        uploadLut(entry.id, renderer)
+        _uiState.update { it.copy(labLutTick = it.labLutTick + 1) }
+        setLabLut(entry.id)
+    }
+
+    /** Reads a LUT's pixels and hands them to the GL thread. */
+    fun uploadLut(id: String, renderer: FilterRenderer?) {
+        val px = lutStore.pixelsFor(id) ?: return
+        renderer?.queueLutUpload(id, px.pixels, px.side, px.cube)
+    }
+
     /** [shadow] true for the shadow anchor, false for the highlight. Packed ARGB. */
     fun setLabDuotoneColour(shadow: Boolean, argb: Int) {
         _uiState.update {
@@ -606,6 +667,11 @@ class CameraViewModel @Inject constructor(
     /** Pushes mirror + buffer size into the GL pipeline. Call on bind + flip. */
     fun syncRenderer(renderer: FilterRenderer) {
         glRenderer = renderer
+        // A fresh GL context has no LUT textures, so re-upload whatever the
+        // current recipe names. Without this, returning from the background after
+        // a context loss would silently drop the LUT from every recipe.
+        val lutId = _uiState.value.labRecipe.lutId ?: _uiState.value.filter.lab?.lutId
+        if (lutId != null) uploadLut(lutId, renderer)
         // Selfie mirror only when the user wants it; back camera never mirrors.
         renderer.mirror = _uiState.value.frontCamera && _uiState.value.mirrorFront
         renderer.bufWidth = controller.bufferWidth

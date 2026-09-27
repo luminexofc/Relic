@@ -205,6 +205,11 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     var countdown by remember { mutableStateOf<Int?>(null) }
     var optionSheet by remember { mutableStateOf<String?>(null) }
     var showFilters by remember { mutableStateOf(false) }
+    // Filter Lab: import a Hald CLUT. GetContent rather than OpenDocument so the
+    // user is not forced to grant persistent access to a whole provider.
+    val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.importLut(uri, renderer)
+    }
     var galleryThumb by remember { mutableStateOf<Bitmap?>(null) }
     var orientBucket by remember { mutableStateOf(0) }
     var orientAngle by remember { mutableFloatStateOf(0f) }
@@ -577,6 +582,13 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 onResetAll = viewModel::resetLabKnobs,
                 onEffect = viewModel::setLabEffect,
                 onDuoColour = viewModel::setLabDuotoneColour,
+                luts = remember(state.labLutTick) { viewModel.labLuts() },
+                onPickLut = { id ->
+                    viewModel.setLabLut(id)
+                    viewModel.uploadLut(id, renderer)
+                },
+                onImportLut = { lutPicker.launch("image/*") },
+                onLutAmount = viewModel::setLabLutAmount,
                 onIntensity = viewModel::setLabIntensity,
                 onSave = viewModel::saveLab,
                 onEdit = viewModel::editLabRecipe,

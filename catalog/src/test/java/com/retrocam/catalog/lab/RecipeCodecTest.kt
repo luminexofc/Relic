@@ -27,6 +27,23 @@ class RecipeCodecTest {
 
     private fun b64(s: String) = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(s.toByteArray())
 
+    /**
+     * Builds a raw v3 payload without hand-counting commas. Field order must match
+     * RecipeCodec.encode: version, name, baseId, template, five knobs, six
+     * effects, two colours, then the lut pair.
+     */
+    private fun payload(
+        version: String = "3",
+        name: String = "X",
+        base: String = "original",
+        template: String = "-",
+        knobs: List<String> = listOf("0", "1", "1", "0", "0"),
+        effects: List<String> = List(6) { "0" },
+        colours: List<String> = listOf("0", "255"),
+        lut: List<String> = listOf("-", "0"),
+    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut)
+        .joinToString(",")
+
     @Test
     fun `round trips`() {
         val r = recipe()
@@ -39,7 +56,7 @@ class RecipeCodecTest {
         // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(17, enc.split(',').size, "bad field count in '$enc'")
+        assertEquals(19, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
     }
 
@@ -58,6 +75,28 @@ class RecipeCodecTest {
     }
 
     @Test
+    fun `a lut reference survives a round trip and a missing lut does not break it`() {
+        val r = SavedRecipe.create("FILMED", "original", LabRecipe(lutId = "builtin_faded", lutAmount = 0.8f))
+        val back = assertNotNull(RecipeCodec.decode(RecipeCodec.encode(r)))
+        assertEquals("builtin_faded", back.lab.lutId)
+        assertEquals(0.8f, back.lab.lutAmount, 1e-4f)
+        assertTrue(back.lab.lutActive)
+    }
+
+    @Test
+    fun `recipes differing only by their lut get different ids`() {
+        val a = SavedRecipe.create("L", "original", LabRecipe(lutId = "builtin_faded", lutAmount = 0.5f))
+        val b = SavedRecipe.create("L", "original", LabRecipe(lutId = "builtin_cross", lutAmount = 0.5f))
+        assertTrue(a.id != b.id, "lut must be part of the content hash")
+    }
+
+    @Test
+    fun `lut amount is clamped on decode`() {
+        val wild = payload(lut = listOf("lut_abc", "99"))
+        assertEquals(1f, assertNotNull(RecipeCodec.decode(wild)).lab.lutAmount)
+    }
+
+    @Test
     fun `recipes differing only by an effect get different ids`() {
         val plain = recipe()
         val grainy = SavedRecipe.create("SUNSET 94", "original", plain.lab.copy(grain = 0.5f))
@@ -66,9 +105,8 @@ class RecipeCodecTest {
 
     @Test
     fun `effect amounts are clamped on decode`() {
-        val wild = "2,${b64("X")},original,-,0,1,1,0,0,9,-9,9,-9,9,-9,-1,999999999"
-        val back = assertNotNull(RecipeCodec.decode(wild))
-        val r = back.lab
+        val wild = payload(effects = listOf("9", "-9", "9", "-9", "9", "-9"))
+        val r = assertNotNull(RecipeCodec.decode(wild)).lab
         assertEquals(1f, r.vignette); assertEquals(0f, r.grain)
         assertEquals(1f, r.sharpen); assertEquals(0f, r.blur)
         assertEquals(1f, r.glitch); assertEquals(0f, r.duotone)
@@ -134,13 +172,14 @@ class RecipeCodecTest {
             "1",
             "1,a,b",                                   // too few fields
             "1,QUJD,original",                         // truncated
-            "1,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,9", // too many fields
-            "1,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // wrong version (v1)
-            "3,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // future version
-            "1,!!!!,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // bad base64
-            "1,QUJD,original,-,x,1,1,0,0,0,0,0,0,0,0,0,0,0",   // unparseable float
-            "1,,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0",     // empty name
-            "1," + "A".repeat(4000) + ",original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0", // oversized
+            "1," + List(20) { "0" }.joinToString(","), // wrong shape
+            "1,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",  // too many fields
+            "2,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",  // old version
+            "4,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",  // future version
+            "1,!!!!,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",  // bad base64
+            "1,QUJD,original,-,x,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",  // unparseable float
+            "1,,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0",       // empty name
+            "1," + "A".repeat(4000) + ",original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,-,0", // oversized
         )
         for (s in junk) {
             assertNull(RecipeCodec.decode(s), "should not decode: '$s'")
@@ -150,7 +189,7 @@ class RecipeCodecTest {
     @Test
     fun `hostile knob values are clamped not rejected`() {
         // A hand-edited string should degrade to a usable filter, not vanish.
-        val wild = "2,${b64("X")},original,-,99,99,-5,50,-50,99,-99,99,-99,99,-99,0,255"
+        val wild = payload(knobs = listOf("99", "99", "-5", "50", "-50"))
         val back = assertNotNull(RecipeCodec.decode(wild))
         val a = back.lab.adjustments
         assertTrue(a.brightness <= 1f, "brightness not clamped")

@@ -63,6 +63,12 @@ object Shaders {
         uniform vec3 u_duoShadow;
         uniform vec3 u_duoHighlight;
 
+        // Filter Lab 3D LUT (a Hald CLUT). u_lutAmount 0 leaves it unbound.
+        uniform sampler2D u_lut;
+        uniform float u_lutAmount;
+        uniform float u_lutCube;   // 16 or 64
+        uniform float u_lutGrid;   // sqrt(cube): 4 or 8
+
         // All filter code works in FRAME space (0..1 across the destination, so
         // uv * u_resolution is real square pixels). sampleSrc maps any frame
         // coordinate back to the source texture through the combined matrix
@@ -920,6 +926,24 @@ object Shaders {
                 dot(u_ccmR2, c)
             ) + u_ccmOffset;
             c = clamp(graded, 0.0, 1.0);
+
+            // --- 3D LUT (Hald CLUT) ---
+            // Upstream's index maths, transcribed. Must stay in step with
+            // LutCatalog.haldTexel, which the unit tests pin.
+            //   blueIndex = b*(cube-1)/255 ; tile = (blueIndex%grid, blueIndex/grid)
+            //   x = tileX*cube + r*(cube-1)/255, y = tileY*cube + g*(cube-1)/255
+            if (u_lutAmount > 0.0) {
+                float maxC = u_lutCube - 1.0;
+                float bi = floor(c.b * maxC + 0.5);
+                float tx = mod(bi, u_lutGrid);
+                float ty = floor(bi / u_lutGrid);
+                vec2 px = vec2(
+                    tx * u_lutCube + floor(c.r * maxC + 0.5),
+                    ty * u_lutCube + floor(c.g * maxC + 0.5)
+                ) + 0.5;
+                vec3 mapped = texture2D(u_lut, px / (u_lutGrid * u_lutCube)).rgb;
+                c = mix(c, mapped, u_lutAmount);
+            }
 
             // --- duotone: luminance ramp between the two chosen colours ---
             if (u_duotone > 0.0) {
