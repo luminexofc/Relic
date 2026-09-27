@@ -70,8 +70,13 @@ fun LabScreen(viewModel: CameraViewModel) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val renderer = remember { FilterRenderer(onTextureReady = {}) }
+    // The renderer posts onTextureReady on the main thread already.
+    //
+    // The callback MUST assign `texture`, and `texture` must be declared first:
+    // it is how the camera learns this screen's SurfaceTexture, and without the
+    // assignment the camera stays bound to nothing and the viewfinder is black.
     var texture by remember { mutableStateOf<SurfaceTexture?>(null) }
+    val renderer = remember { FilterRenderer(onTextureReady = { texture = it }) }
     var glView by remember { mutableStateOf<GLSurfaceView?>(null) }
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val watermarks by viewModel.watermarks.collectAsStateWithLifecycle()
@@ -247,6 +252,8 @@ fun LabScreen(viewModel: CameraViewModel) {
             onApplyPaletteColour = viewModel::applyPaletteColour,
             onShare = viewModel::shareRecipe,
             onImportQr = { qrPicker.launch("image/*") },
+            onDeleteLut = viewModel::deleteLut,
+            onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,
             onDeleteSelected = viewModel::clearLabSelection,
             onIntensity = viewModel::setLabIntensity,

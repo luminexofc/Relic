@@ -11,12 +11,12 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import android.media.MediaRecorder
+import com.retrocam.catalog.FilterFamily
 import com.retrocam.catalog.FilterSpec
 import com.retrocam.catalog.Shaders
 import com.retrocam.catalog.lab.LabUniforms
 import com.retrocam.catalog.lab.LutCatalog
 import com.retrocam.catalog.lab.LabRecipe
-import com.retrocam.catalog.lab.LabShaderSpec
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -668,15 +668,44 @@ class FilterRenderer(
         val lab = spec.lab ?: return null
         if (lab.isIdentity) return null
         if (spec !== recipeSpec || intensity != recipeIntensity) {
+            val stage = labStageSpec(spec)
             recipeSpec = spec
             recipeIntensity = intensity
             recipeLinksCache = listOf(
-                ChainLink(spec, intensity),
-                ChainLink(LabShaderSpec.spec, intensity),
+                // lab = null on the base link: its shader ignores the grade
+                // uniforms, and leaving the recipe on it would re-upload twelve
+                // floats per pass per frame for nothing.
+                ChainLink(spec.copy(lab = null), intensity),
+                ChainLink(stage, intensity),
             )
         }
         return recipeLinksCache
     }
+
+    /**
+     * The grade stage, derived from the spec that carries the recipe.
+     *
+     * This has to be a *copy of that spec* rather than a separate singleton.
+     * `drawFullQuad` only uploads the grade uniforms when `spec.lab` is set, so a
+     * standalone stage spec would render with every uniform still at zero: the
+     * shader would compute black and the shared footer would fade the frame toward
+     * it, which looks exactly like an intensity slider that only darkens and
+     * knobs that do nothing.
+     *
+     * Copying also keeps the stage in step with the base filter's id, so the
+     * program cache gets one stable key instead of recompiling.
+     */
+    private fun labStageSpec(spec: FilterSpec): FilterSpec = spec.copy(
+        id = LAB_STAGE_ID,
+        displayName = "LAB",
+        family = FilterFamily.LAB,
+        fragmentBody = Shaders.LAB_GRADE,
+        param1 = 0f,
+        param2 = 0f,
+        param3 = 0f,
+        palette = null,
+        temporal = false,
+    )
 
     /**
      * True when the producer's transform rotates the buffer 90/270 degrees, so
@@ -1585,3 +1614,9 @@ class FilterRenderer(
                 .apply { put(values); position(0) }
     }
 }
+
+/**
+ * Program cache key for the Filter Lab grade stage. Must not collide with a
+ * catalog filter id, or a recipe's stage would reuse the wrong program.
+ */
+private const val LAB_STAGE_ID = "lab_grade"

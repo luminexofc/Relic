@@ -128,24 +128,3 @@ data class LabRecipe(
         )
     }
 }
-
-/**
- * The synthetic [com.retrocam.catalog.FilterSpec] for the lab's grade stage.
- *
- * It is never in the filter strip and never selected on its own — the renderer
- * appends it as the second link when a spec carries a [LabRecipe]. Keeping it a
- * normal spec means it reuses the existing program cache, uniform upload and
- * safe-mode fallback with no special cases.
- */
-object LabShaderSpec {
-    val spec = com.retrocam.catalog.FilterSpec(
-        id = "lab_grade",
-        displayName = "LAB",
-        family = com.retrocam.catalog.FilterFamily.LAB,
-        fragmentBody = com.retrocam.catalog.Shaders.LAB_GRADE,
-        param1 = 0f,
-        param2 = 0f,
-        defaultIntensity = 1f,
-        context = "filter lab colour grade stage",
-    )
-}

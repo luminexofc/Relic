@@ -203,13 +203,24 @@ class CameraViewModel @Inject constructor(
         setLabWatermark(entry.first)
     }
 
-    /** Rasterises the current stamp text and queues it for the GL thread. */
+    /**
+     * Rasterises the current stamp text and queues it for the GL thread.
+     *
+     * Deliberately off the main thread. Rasterising allocates a multi-megabyte
+     * probe, has upstream copy it, and then scans it for the glyph bounds, so
+     * doing that inline in a click handler was stalling long enough to be killed
+     * as an ANR.
+     */
     private fun syncStamp() {
         val r = _uiState.value.labRecipe
-        val text = r.stampText
-        if (text.isNullOrBlank()) return
-        val raster = overlayRaster.stamp(text, r.stampColor) ?: return
-        glRenderer?.queueOverlayUpload(stampTextureId(text, r.stampColor), raster.pixels, raster.width, raster.height, raster.aspect)
+        val text = r.stampText ?: return
+        if (text.isBlank()) return
+        val color = r.stampColor
+        val id = stampTextureId(text, color)
+        viewModelScope.launch(Dispatchers.Default) {
+            val raster = overlayRaster.stamp(text, color) ?: return@launch
+            glRenderer?.queueOverlayUpload(id, raster.pixels, raster.width, raster.height, raster.aspect)
+        }
     }
 
     private fun stampTextureId(text: String, color: Int) =
@@ -292,6 +303,41 @@ class CameraViewModel @Inject constructor(
                 _uiState.update { it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
             }
         }
+    }
+
+    /**
+     * Deletes an imported LUT and drops it from the draft if it was selected.
+     *
+     * Clearing the reference matters: the shader already degrades gracefully when
+     * a named LUT is missing, but leaving a dangling id in the draft means the
+     * recipe re-encodes a reference to something the user just threw away.
+     */
+    fun deleteLut(id: String) {
+        if (com.retrocam.catalog.lab.LutCatalog.builtInById.containsKey(id)) {
+            Feedback.info(context, "Built-in LUTs can't be deleted")
+            return
+        }
+        if (!lutStore.delete(id)) {
+            Feedback.error(context)
+            return
+        }
+        _uiState.update {
+            if (it.labRecipe.lutId == id) it.copy(labRecipe = it.labRecipe.copy(lutId = null, lutAmount = 0f)) else it
+        }
+        _uiState.update { it.copy(labLutTick = it.labLutTick + 1) }
+        Feedback.info(context, "LUT deleted")
+    }
+
+    fun deleteWatermark(id: String) {
+        if (!overlayRaster.deleteWatermark(id)) {
+            Feedback.error(context)
+            return
+        }
+        _uiState.update {
+            if (it.labRecipe.watermarkId == id) it.copy(labRecipe = it.labRecipe.copy(watermarkId = null)) else it
+        }
+        refreshOverlays()
+        Feedback.info(context, "Watermark deleted")
     }
 
     /** Applies a palette colour to a duotone anchor. */

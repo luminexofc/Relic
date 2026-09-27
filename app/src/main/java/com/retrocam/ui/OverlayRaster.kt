@@ -33,19 +33,25 @@ class OverlayRaster(context: Context) {
      *
      * Upstream derives its text size from the *source* height
      * (`max(24, height * 0.038)`), so the probe has to be tall enough to get the
-     * size we want and the result is cropped back down to the glyphs. Position
+     * size we want, and the result is cropped back down to the glyphs. Position
      * and padding are irrelevant here: the shader places the finished bitmap in
      * UV space, so rasterising always uses TOP_LEFT with no padding.
+     *
+     * The target size is deliberately modest. The shader scales this to about 4%
+     * of the frame regardless, so a bigger raster only costs memory and time
+     * proportional to the square.
+     *
+     * NOT safe to call on the main thread: this allocates several megabytes and
+     * runs a Canvas pass per call. Callers must dispatch it.
      */
     fun stamp(text: String, color: Int): Raster? {
         val key = "$text|$color"
         stampCache[key]?.let { return it.toRaster() }
         if (text.isBlank()) return null
 
-        // Aim for a text height that stays crisp when the shader scales it to
-        // roughly 4% of a 1080p frame.
-        val wantText = 64f
-        val probeH = (wantText / DateStamp.TEXT_HEIGHT_FRACTION).toInt().coerceAtLeast(64)
+        // probeH follows from upstream's own formula: textSize = probeH * 0.038.
+        val wantText = 40f
+        val probeH = (wantText / DateStamp.TEXT_HEIGHT_FRACTION).toInt().coerceAtLeast(96)
         val probeW = (text.length * wantText * 0.75f).toInt().coerceAtLeast(16) + 64
 
         val probe = Bitmap.createBitmap(probeW, probeH, Bitmap.Config.ARGB_8888)
@@ -66,6 +72,12 @@ class OverlayRaster(context: Context) {
             return null
         }
         stampCache[key] = cropped
+        // Each distinct text/colour keeps a bitmap alive; cap it so a user
+        // fiddling with the stamp cannot grow the heap without bound.
+        if (stampCache.size > 8) {
+            stampCache.entries.first().value.recycle()
+            stampCache.remove(stampCache.entries.first().key)
+        }
         return cropped.toRaster()
     }
 
@@ -148,6 +160,12 @@ class OverlayRaster(context: Context) {
         }
         bmp.recycle()
         return Result.success(id to id.removePrefix("mark_").take(10).uppercase())
+    }
+
+    /** Removes an imported logo. Built-ins do not exist on disk and are refused. */
+    fun deleteWatermark(id: String): Boolean {
+        if (!id.startsWith("mark_")) return false
+        return File(marks, "$id.png").delete()
     }
 
     fun watermark(id: String): Raster? {

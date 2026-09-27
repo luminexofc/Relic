@@ -3,6 +3,7 @@ package com.retrocam.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,8 @@ fun FilterLabPanel(
     onApplyPaletteColour: (Int, Boolean) -> Unit,
     onShare: (String) -> Unit,
     onImportQr: () -> Unit,
+    onDeleteLut: (String) -> Unit,
+    onDeleteWatermark: (String) -> Unit,
     selectedRecipeId: String?,
     onUse: (String) -> Unit,
     onDeleteSelected: () -> Unit,
@@ -173,12 +176,21 @@ fun FilterLabPanel(
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(luts, key = { it.id }) { e ->
+                    // Imported LUTs are deletable; the generated ones are not, so
+                    // they get no long-press handler at all.
+                    val onLong = if (e.builtin == null) {
+                        { onDeleteLut(e.id) }
+                    } else {
+                        null
+                    }
                     TemplateChip(
-                        e.displayName,
-                        recipe.lutId == e.id,
-                        accent,
-                        dim,
-                    ) { onPickLut(e.id) }
+                        label = e.displayName,
+                        selected = recipe.lutId == e.id,
+                        accent = accent,
+                        dim = dim,
+                        onClick = { onPickLut(e.id) },
+                        onLongClick = onLong,
+                    )
                 }
                 item { ImportChip("+ IMPORT LUT", dim, onImportLut) }
             }
@@ -217,7 +229,14 @@ fun FilterLabPanel(
                     TemplateChip("NONE", recipe.watermarkId == null, accent, dim) { onPickWatermark(null) }
                 }
                 items(watermarks, key = { it.first }) { (id, label) ->
-                    TemplateChip(label, recipe.watermarkId == id, accent, dim) { onPickWatermark(id) }
+                    TemplateChip(
+                        label = label,
+                        selected = recipe.watermarkId == id,
+                        accent = accent,
+                        dim = dim,
+                        onClick = { onPickWatermark(id) },
+                        onLongClick = { onDeleteWatermark(id) },
+                    )
                 }
                 item { ImportChip("+ IMPORT", dim, onImportWatermark) }
             }
@@ -562,11 +581,15 @@ private fun CategoryChip(
 }
 
 @Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun TemplateChip(
     label: String,
     selected: Boolean,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
+    // Declared before onClick so onClick stays the last parameter and the
+    // trailing-lambda call sites below still bind to it.
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Box(
@@ -575,7 +598,13 @@ private fun TemplateChip(
                 if (selected) accent else MaterialTheme.colorScheme.surface,
                 RoundedCornerShape(50),
             )
-            .clickable(onClick = onClick)
+            .then(
+                if (onLongClick == null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+                },
+            )
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
         Text(

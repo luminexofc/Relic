@@ -1,6 +1,7 @@
 package com.retrocam.ui
 
 import android.content.Context
+import android.widget.Toast
 import android.media.MediaActionSound
 import android.os.Build
 import android.os.VibrationEffect
@@ -27,6 +28,15 @@ object Feedback {
         if (!soundOn) return
         ensureSoundLoaded()
         runCatching { actionSound?.play(MediaActionSound.SHUTTER_CLICK) }
+    }
+
+    /**
+     * A short confirmation, for things a haptic cannot express: "LUT deleted",
+     * "that file was too small". A haptic alone leaves the user unsure whether
+     * the tap registered.
+     */
+    fun info(context: Context, message: String) {
+        runCatching { Toast.makeText(context, message, Toast.LENGTH_SHORT).show() }
     }
 
     fun select(context: Context) = buzz(context, VibrationEffect.EFFECT_TICK)
