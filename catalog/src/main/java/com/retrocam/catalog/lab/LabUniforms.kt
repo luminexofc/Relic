@@ -31,6 +31,12 @@ data class LabUniforms(
     /** `[x0,y0,x1,y1]` in frame UV, or [NO_RECT] for no watermark. */
     val markRect: FloatArray,
     val markAlpha: Float,
+    val contrast: Float,
+    val brightness: Float,
+    val rScale: Float,
+    val gScale: Float,
+    val bScale: Float,
+    val saturation: Float,
     val gamma: Float,
     val splitAmount: Float,
     val shadowTint: FloatArray,
@@ -70,8 +76,18 @@ data class LabUniforms(
             recipe: LabRecipe,
             stampAspect: Float = DateStamp.aspectFor(recipe.stampText.orEmpty()),
             markAspect: Float = 1f,
-        ): LabUniforms = LabUniforms(
-            ccm = LabGrading.uniformsFor(recipe.templateMatrix(), recipe.adjustments),
+        ): LabUniforms {
+            // Adobe's order needs the knobs apart: contrast is applied second
+            // while temp/tint and saturation come after the range and local work.
+            val g = LabGrading.split(recipe.templateMatrix(), recipe.adjustments)
+            return LabUniforms(
+            ccm = g.template,
+            contrast = g.contrast,
+            brightness = g.brightness,
+            rScale = g.rScale,
+            gScale = g.gScale,
+            bScale = g.bScale,
+            saturation = g.saturation,
             vignette = recipe.vignette.coerceIn(0f, 1f),
             grain = recipe.grain.coerceIn(0f, 1f),
             sharpen = recipe.sharpen.coerceIn(0f, 1f),
@@ -97,7 +113,8 @@ data class LabUniforms(
             splitAmount = recipe.splitAmount.coerceIn(0f, 1f),
             shadowTint = unpackRgb(recipe.shadowTint),
             highlightTint = unpackRgb(recipe.highlightTint),
-        )
+            )
+        }
     }
 }
 

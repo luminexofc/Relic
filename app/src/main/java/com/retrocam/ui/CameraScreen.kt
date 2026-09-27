@@ -611,7 +611,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 // The gallery thumbnail and the flip button sat hard against the
                 // screen edges, which made this row read as full-bleed chrome
                 // rather than controls.
-                .padding(horizontal = 24.dp, bottom = 24.dp, top = 4.dp),
+                .padding(start = 24.dp, top = 4.dp, end = 24.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1186,6 +1186,7 @@ private fun ModeDivider() {
     }
 }
 
+@Composable
 private fun ModePill(
     label: String,
     active: Boolean,
@@ -1204,13 +1205,14 @@ private fun ModePill(
                 if (active) MaterialTheme.colorScheme.surface else Color.Transparent,
             )
             .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 4.dp)
+            // Border before padding, not after. Modifier order runs outside-in,
+            // so padding-then-border draws the border around the text only and
+            // leaves the surface fill showing as a larger box behind it.
             .border(
                 1.dp,
                 if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
                 RoundedCornerShape(ShadcnRadius.Lg),
             )
-            .clickable(onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 6.dp),
     )
 }

@@ -75,6 +75,12 @@ class FilterRenderer(
         val uMaskRect: Int,
         val uMaskShape: Int,
         val uMaskFeather: Int,
+        val uContrast: Int,
+        val uBrightness: Int,
+        val uRScale: Int,
+        val uGScale: Int,
+        val uBScale: Int,
+        val uSaturation: Int,
         val uGamma: Int,
         val uSplitAmount: Int,
         val uShadowTint: Int,
@@ -652,6 +658,12 @@ class FilterRenderer(
                 uMaskRect = GLES20.glGetUniformLocation(p, "u_maskRect"),
                 uMaskShape = GLES20.glGetUniformLocation(p, "u_maskShape"),
                 uMaskFeather = GLES20.glGetUniformLocation(p, "u_maskFeather"),
+                uContrast = GLES20.glGetUniformLocation(p, "u_contrast"),
+                uBrightness = GLES20.glGetUniformLocation(p, "u_brightness"),
+                uRScale = GLES20.glGetUniformLocation(p, "u_rScale"),
+                uGScale = GLES20.glGetUniformLocation(p, "u_gScale"),
+                uBScale = GLES20.glGetUniformLocation(p, "u_bScale"),
+                uSaturation = GLES20.glGetUniformLocation(p, "u_saturation"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
                 uSplitAmount = GLES20.glGetUniformLocation(p, "u_splitAmount"),
                 uShadowTint = GLES20.glGetUniformLocation(p, "u_shadowTint"),
@@ -984,6 +996,16 @@ class FilterRenderer(
                 GLES20.glUniform1f(prog.uMaskShape, 0f)
                 GLES20.glUniform1f(prog.uMaskFeather, 0f)
             }
+            // Adobe's order: contrast early, saturation late, so they are
+            // separate uniforms rather than one composited matrix. brightness
+            // arrives in 0-255 units and the shader divides, matching what the
+            // old matrix translation column carried.
+            GLES20.glUniform1f(prog.uContrast, u.contrast)
+            GLES20.glUniform1f(prog.uBrightness, u.brightness / 255f)
+            GLES20.glUniform1f(prog.uRScale, u.rScale)
+            GLES20.glUniform1f(prog.uGScale, u.gScale)
+            GLES20.glUniform1f(prog.uBScale, u.bScale)
+            GLES20.glUniform1f(prog.uSaturation, u.saturation)
             GLES20.glUniform1f(prog.uGamma, u.gamma)
             GLES20.glUniform1f(prog.uSplitAmount, u.splitAmount)
             GLES20.glUniform3f(prog.uShadowTint, u.shadowTint[0], u.shadowTint[1], u.shadowTint[2])

@@ -122,6 +122,63 @@ object LabGrading {
      *
      * Returns a fresh 4x5 in 0-255 units. Pass it to [toUniforms].
      */
+    /**
+     * The knobs in Adobe's application order, split out of the matrix.
+     *
+     * The four 4x5s above all turn out to be reproducible as scalars, which is
+     * why this split costs six floats rather than two more matrices:
+     *
+     *  - contrast is `c * in + 128 * (1 - c) + brightness * 255`
+     *  - warmth/tint is three diagonal scales with no translation column
+     *  - saturation is `lum + s * (in - lum)`, which is exactly
+     *    [saturationMatrix] since that is built from the same luminance weights
+     *
+     * They have to be separate because Adobe's order is not commutative:
+     * contrast comes second, before the range and local-contrast work, while
+     * temp/tint and saturation come after it. Composited into one matrix they
+     * could not be placed at all, which is what made the single-matrix shortcut
+     * incompatible with an XMP import.
+     *
+     * [template] stays a matrix and stays first. A template is a whole base look,
+     * not a setting, so it belongs ahead of the adjustments rather than in the
+     * middle of them.
+     */
+    data class Split(
+        /** The template matrix alone, 12 floats ready for the shader. */
+        val template: FloatArray,
+        val contrast: Float,
+        /** Post-contrast offset, 0-255 units, as the old matrix carried it. */
+        val brightness: Float,
+        val rScale: Float,
+        val gScale: Float,
+        val bScale: Float,
+        val saturation: Float,
+    )
+
+    fun split(template: FloatArray?, adjustments: LabAdjustments): Split {
+        val a = LabAdjustments.coerce(adjustments)
+        val m = if (template != null && template.size == 20) template.copyOf() else IDENTITY.copyOf()
+        val wt = warmthTintMatrix(a.warmth, a.tint)
+        return Split(
+            template = toUniforms(m),
+            contrast = a.contrast,
+            brightness = a.brightness,
+            // The 4x5 is row-major with 5 columns, so the diagonal is at 0, 6
+            // and 12 - NOT at 0, 5 and 10, which are the first entry of each row
+            // and all zero. Reading those gives gScale = bScale = 0, and since
+            // the shader multiplies by vec3(rScale, gScale, bScale) that would
+            // have driven green and blue to black on every single frame.
+            rScale = wt[0],          // warmth -> red
+            gScale = wt[6],          // tint    -> green
+            bScale = wt[12],         // warmth -> blue
+            saturation = a.saturation,
+        )
+    }
+
+    @Deprecated(
+        "Kept so the existing composition tests still have something to exercise. " +
+            "The shader no longer takes a composited matrix; use split().",
+    )
     fun compose(template: FloatArray?, adjustments: LabAdjustments): FloatArray {
         val a = LabAdjustments.coerce(adjustments)
         var m = if (template != null && template.size == 20) template.copyOf() else IDENTITY.copyOf()

@@ -72,6 +72,17 @@ object Shaders {
         uniform float u_maskShape; // 0 full, 1 rect, 2 ellipse, 3 band h, 4 band v
         uniform float u_maskFeather;
 
+        // Adobe's application order forces the grading knobs apart. Contrast is
+        // applied second, before the range and local-contrast work, while
+        // temp/tint and saturation come after it, so they cannot share one
+        // matrix. u_ccm* now carries the template alone.
+        uniform float u_contrast;
+        uniform float u_brightness;   // 0-1, pre-divided from 0-255
+        uniform float u_rScale;       // warmth
+        uniform float u_gScale;       // tint
+        uniform float u_bScale;       // warmth
+        uniform float u_saturation;
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -941,8 +952,88 @@ object Shaders {
             // for the convolutions and the channel split.
             vec2 texel = 1.0 / max(u_resolution, vec2(1.0));
 
-            // --- sharpen: 3x3 [0,-1,0 / -1,5,-1 / 0,-1,0], mixed by amount ---
+            // The working colour for the whole body. Every stage below reads and
+            // writes this, so it is declared once here rather than next to
+            // whichever stage happened to come first.
             vec3 c = src.rgb;
+
+            // --- 1. the template, a whole base look, applied ahead of the
+            // adjustments because it is not itself an adjustment ---
+            vec3 graded = vec3(
+                dot(u_ccmR0, c),
+                dot(u_ccmR1, c),
+                dot(u_ccmR2, c)
+            ) + u_ccmOffset;
+            c = clamp(graded, 0.0, 1.0);
+
+            // --- 2. Exposure, as a midtone power curve. Applied as 1/gamma so
+            // that raising it brightens, which is how every photo tool presents
+            // it. This is the first adjustment in Adobe's order because it moves
+            // the whole tonal range and everything after it is defined relative
+            // to where the tones now sit. ---
+            if (abs(u_gamma - 1.0) > 0.001) {
+                vec3 g = vec3(1.0 / max(u_gamma, 0.001));
+                c = pow(max(c, vec3(0.0)), g);
+            }
+
+            // --- 3. Contrast, pivoting on mid-grey: c*in + 0.502*(1-c) ---
+            // Second in Adobe's order, ahead of the range work, so the highlight
+            // and shadow adjustments below are computed against the final
+            // contrast rather than a stale one.
+            if (abs(u_contrast - 1.0) > 0.001 || abs(u_brightness) > 0.001) {
+                c = c * u_contrast + 0.502 * (1.0 - u_contrast) + u_brightness;
+            }
+
+            // --- 4. Highlights / Shadows / Whites / Blacks land here (phase 3) ---
+
+            // --- 5. Texture / Clarity / Dehaze land here (phase 4). Adobe
+            // applies local contrast BEFORE the tone curve, not after. ---
+
+            // --- 6. Temp and Tint: three diagonal scales, no offset ---
+            c *= vec3(u_rScale, u_gScale, u_bScale);
+
+            // --- 7. Vibrance and Saturation. This is exactly
+            // LabGrading.saturationMatrix, since both are built from the same
+            // luminance weights: out = lum + s*(in - lum). ---
+            if (abs(u_saturation - 1.0) > 0.001) {
+                float lum = luminance(c);
+                c = mix(vec3(lum), c, u_saturation);
+            }
+
+            c = clamp(c, 0.0, 1.0);
+
+            // --- 3D LUT (Hald CLUT) ---
+            // Upstream's index maths, transcribed. Must stay in step with
+            // LutCatalog.haldTexel, which the unit tests pin.
+            //   blueIndex = b*(cube-1)/255 ; tile = (blueIndex%grid, blueIndex/grid)
+            //   x = tileX*cube + r*(cube-1)/255, y = tileY*cube + g*(cube-1)/255
+            if (u_lutAmount > 0.0) {
+                float maxC = u_lutCube - 1.0;
+                float bi = floor(c.b * maxC + 0.5);
+                float tx = mod(bi, u_lutGrid);
+                float ty = floor(bi / u_lutGrid);
+                vec2 px = vec2(
+                    tx * u_lutCube + floor(c.r * maxC + 0.5),
+                    ty * u_lutCube + floor(c.g * maxC + 0.5)
+                ) + 0.5;
+                vec3 mapped = texture2D(u_lut, px / (u_lutGrid * u_lutCube)).rgb;
+                c = mix(c, mapped, u_lutAmount);
+            }
+
+            // --- split tone: pull a tint into the shadows and another into the
+            // highlights, keyed off luminance. Mirrored about mid grey so the two
+            // ends cannot both push the same way. ---
+            if (u_splitAmount > 0.0) {
+                float l = luminance(c);
+                vec3 tint = mix(u_shadowTint, u_highlightTint, smoothstep(0.0, 1.0, l));
+                // A tint at 0.5 grey is a no-op, so this shifts hue without
+                // dragging overall brightness with it.
+                c = mix(c, c * (tint * 2.0), u_splitAmount);
+            }
+
+            // --- Sharpness. Adobe applies it after the tone curve and Look,
+            // not before, so a preset's curve shapes the tones and then the
+            // edges are found on the shaped result. --- [0,-1,0 / -1,5,-1 / 0,-1,0], mixed by amount ---
             if (u_sharpen > 0.0) {
                 vec3 sum = vec3(0.0);
                 sum += sampleSrc(uv + vec2(-texel.x, 0.0)).rgb * -1.0;
@@ -974,50 +1065,6 @@ object Shaders {
                 vec2 g = vec2(max(1.0 / u_resolution.x, 0.0015) * u_glitch * 10.0, 0.0);
                 c.r = sampleSrc(uv - g).r;
                 c.b = sampleSrc(uv + g).b;
-            }
-
-            // --- grade: rows from LabGrading.toUniforms, offset pre-divided by 255 ---
-            vec3 graded = vec3(
-                dot(u_ccmR0, c),
-                dot(u_ccmR1, c),
-                dot(u_ccmR2, c)
-            ) + u_ccmOffset;
-            c = clamp(graded, 0.0, 1.0);
-
-            // --- 3D LUT (Hald CLUT) ---
-            // Upstream's index maths, transcribed. Must stay in step with
-            // LutCatalog.haldTexel, which the unit tests pin.
-            //   blueIndex = b*(cube-1)/255 ; tile = (blueIndex%grid, blueIndex/grid)
-            //   x = tileX*cube + r*(cube-1)/255, y = tileY*cube + g*(cube-1)/255
-            if (u_lutAmount > 0.0) {
-                float maxC = u_lutCube - 1.0;
-                float bi = floor(c.b * maxC + 0.5);
-                float tx = mod(bi, u_lutGrid);
-                float ty = floor(bi / u_lutGrid);
-                vec2 px = vec2(
-                    tx * u_lutCube + floor(c.r * maxC + 0.5),
-                    ty * u_lutCube + floor(c.g * maxC + 0.5)
-                ) + 0.5;
-                vec3 mapped = texture2D(u_lut, px / (u_lutGrid * u_lutCube)).rgb;
-                c = mix(c, mapped, u_lutAmount);
-            }
-
-            // --- gamma: midtone power curve, applied as 1/gamma so that raising
-            // it brightens, which is how every photo tool presents it ---
-            if (abs(u_gamma - 1.0) > 0.001) {
-                vec3 g = vec3(1.0 / max(u_gamma, 0.001));
-                c = pow(max(c, vec3(0.0)), g);
-            }
-
-            // --- split tone: pull a tint into the shadows and another into the
-            // highlights, keyed off luminance. Mirrored about mid grey so the two
-            // ends cannot both push the same way. ---
-            if (u_splitAmount > 0.0) {
-                float l = luminance(c);
-                vec3 tint = mix(u_shadowTint, u_highlightTint, smoothstep(0.0, 1.0, l));
-                // A tint at 0.5 grey is a no-op, so this shifts hue without
-                // dragging overall brightness with it.
-                c = mix(c, c * (tint * 2.0), u_splitAmount);
             }
 
             // --- duotone: luminance ramp between the two chosen colours ---
