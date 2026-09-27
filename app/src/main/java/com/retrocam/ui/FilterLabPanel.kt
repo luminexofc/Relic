@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -91,6 +92,8 @@ fun FilterLabPanel(
     onWatermarkAlpha: (Float) -> Unit,
     onExtractPalette: () -> Unit,
     onApplyPaletteColour: (Int, Boolean) -> Unit,
+    onShare: (String) -> Unit,
+    onImportQr: () -> Unit,
     onIntensity: (Float) -> Unit,
     onSave: () -> Unit,
     onEdit: (String) -> Unit,
@@ -294,12 +297,20 @@ fun FilterLabPanel(
         // ---- saved recipes ----
         if (saved.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text(
-                "MY RECIPES",
-                fontFamily = RetroType.Mono,
-                fontSize = 10.sp,
-                color = dim,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("MY RECIPES", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+                Text(
+                    "+ IMPORT QR",
+                    fontFamily = RetroType.Mono,
+                    fontSize = 10.sp,
+                    color = accent,
+                    modifier = Modifier.clickable(onClick = onImportQr).padding(4.dp),
+                )
+            }
             Spacer(Modifier.height(4.dp))
             Column(
                 Modifier
@@ -326,6 +337,9 @@ fun FilterLabPanel(
                         )
                         IconButton(onClick = { onEdit(r.id) }) {
                             Icon(Icons.Filled.Edit, "Edit ${r.name}", tint = dim, modifier = Modifier.size(17.dp))
+                        }
+                        IconButton(onClick = { onShare(r.id) }) {
+                            Icon(Icons.Filled.QrCode, "Share ${r.name} as QR", tint = accent, modifier = Modifier.size(17.dp))
                         }
                         IconButton(onClick = { onDelete(r.id) }) {
                             Icon(Icons.Filled.Delete, "Delete ${r.name}", tint = dim, modifier = Modifier.size(17.dp))

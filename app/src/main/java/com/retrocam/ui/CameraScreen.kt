@@ -213,6 +213,9 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     val markPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importWatermark(uri)
     }
+    val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.importRecipe(uri)
+    }
     val palette by viewModel.palette.collectAsStateWithLifecycle()
     val watermarks by viewModel.watermarks.collectAsStateWithLifecycle()
     var galleryThumb by remember { mutableStateOf<Bitmap?>(null) }
@@ -606,6 +609,8 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
                 onExtractPalette = viewModel::extractPalette,
                 onApplyPaletteColour = viewModel::applyPaletteColour,
+                onShare = viewModel::shareRecipe,
+                onImportQr = { qrPicker.launch("image/*") },
                 onIntensity = viewModel::setLabIntensity,
                 onSave = viewModel::saveLab,
                 onEdit = viewModel::editLabRecipe,

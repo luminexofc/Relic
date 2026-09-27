@@ -254,6 +254,43 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    // ---- sharing ----
+
+    /** Shares a saved recipe as a QR image. */
+    fun shareRecipe(id: String) {
+        val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
+        if (!QrShare.share(context, r)) Feedback.error(context)
+    }
+
+    /**
+     * Imports a recipe from a QR in [uri] and adds it to the strip.
+     *
+     * Re-importing something already present is a no-op, because the recipe id is
+     * a content hash, so sharing the same recipe twice does not fill the strip
+     * with duplicates.
+     */
+    fun importRecipe(uri: android.net.Uri) {
+        val r = QrShare.import(context, uri)
+        if (r == null) {
+            Feedback.error(context)
+            return
+        }
+        viewModelScope.launch {
+            val current = settings.customRecipes.first()
+                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
+            if (current.none { it.id == r.id }) {
+                settings.setCustomRecipes(
+                    (current + r).map { com.retrocam.catalog.lab.RecipeCodec.encode(it) },
+                )
+            }
+            // A recipe whose base filter this install no longer has cannot render,
+            // so do not select it; it stays in the list for later.
+            if (r.toSpec() != null) {
+                _uiState.update { it.copy(labOpen = true, labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
+            }
+        }
+    }
+
     /** Applies a palette colour to a duotone anchor. */
     fun applyPaletteColour(argb: Int, shadow: Boolean) {
         setLabDuotoneColour(shadow, argb)
