@@ -1,6 +1,6 @@
 package com.retrocam.ui
 
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.theme.AppType
 
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
@@ -121,7 +121,7 @@ fun FilterStrip(
                 Text(
                     text = (if (starred) "★" else "") + spec.displayName,
                     fontSize = 10.sp,
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     color = if (selected) Color.White
                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),

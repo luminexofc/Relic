@@ -65,11 +65,13 @@ Used for encoding and decoding Filter Lab recipe QR codes.
 
 ## Bundled fonts
 
-| Font | License |
-|---|---|
-| Press Start 2P | SIL Open Font License 1.1 |
-| VT323 | SIL Open Font License 1.1 |
-| Space Mono | SIL Open Font License 1.1 |
+**None.** The app previously shipped Press Start 2P, VT323 and Space Mono (all
+SIL OFL 1.1) and no longer does: the type stack moved to the platform UI and
+monospace faces as part of the shadcn-style port, so `res/font/` was deleted and
+469 KB of assets went with it. The system faces carry no attribution duty.
+
+The history stays here on purpose: those fonts were genuinely OFL-licensed and
+this notice is what recorded that.
 
 ---
 

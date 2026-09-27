@@ -49,7 +49,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.retrocam.renderer.FilterRenderer
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.theme.AppType
 
 /**
  * The Filter Lab, as a screen of its own.
@@ -157,7 +157,8 @@ fun LabScreen(viewModel: CameraViewModel) {
             }
             Text(
                 "FILTER LAB",
-                fontFamily = RetroType.Display,
+                fontFamily = AppType.Sans,
+                fontWeight = AppType.Strong,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
@@ -201,7 +202,7 @@ fun LabScreen(viewModel: CameraViewModel) {
             ViewfinderCorners(Modifier.fillMaxSize())
             Text(
                 "LIVE PREVIEW",
-                fontFamily = RetroType.Mono,
+                fontFamily = AppType.Sans,
                 fontSize = 9.sp,
                 color = Color.White.copy(alpha = 0.7f),
                 modifier = Modifier

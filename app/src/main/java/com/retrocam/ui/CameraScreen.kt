@@ -2,7 +2,7 @@
 
 package com.retrocam.ui
 
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.theme.AppType
 
 import android.Manifest
 import android.content.Intent
@@ -512,7 +512,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                             Text(
                                 text = "EV " + (if (state.exposureIndex > 0) "+" else "") + state.exposureIndex,
                                 fontSize = 10.sp,
-                                fontFamily = RetroType.Mono,
+                                fontFamily = AppType.Sans,
                                 color = MaterialTheme.colorScheme.primary,
                             )
                             Slider(
@@ -525,7 +525,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                                 Text(
                                     text = "LOCKED · tap to release",
                                     fontSize = 10.sp,
-                                    fontFamily = RetroType.Mono,
+                                    fontFamily = AppType.Sans,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.clickable {
                                         viewModel.unlockFocus()
@@ -542,7 +542,8 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                         Text(
                             text = countdown.toString(),
                             fontSize = 64.sp,
-                            fontFamily = RetroType.Display,
+                            fontFamily = AppType.Sans,
+                            fontWeight = AppType.Strong,
                             color = Color.White,
                         )
                     }
@@ -558,7 +559,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                         Text(
                             text = String.format("%.1f×", state.zoomRatio),
                             style = MaterialTheme.typography.labelLarge,
-                            fontFamily = RetroType.Mono,
+                            fontFamily = AppType.Sans,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
@@ -574,7 +575,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                             state.recordSeconds / 60,
                             state.recordSeconds % 60,
                         ),
-                        fontFamily = RetroType.Mono,
+                        fontFamily = AppType.Sans,
                         style = MaterialTheme.typography.labelLarge,
                         color = Color.Red,
                         modifier = Modifier
@@ -733,7 +734,8 @@ private fun TopBar(
         Text(
             text = "RetroCam",
             style = MaterialTheme.typography.titleLarge,
-            fontFamily = RetroType.Display,
+            fontFamily = AppType.Sans,
+            fontWeight = AppType.Strong,
             color = MaterialTheme.colorScheme.onBackground,
             modifier = Modifier.weight(1f),
         )
@@ -870,7 +872,7 @@ private fun ToolButton(
                 Text(
                     text = badge,
                     fontSize = 9.sp,
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -905,7 +907,7 @@ fun OptionsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, fontFamily = RetroType.Mono) },
+        title = { Text(title, fontFamily = AppType.Sans) },
         text = {
             LazyColumn {
                 items(options) { option ->
@@ -923,7 +925,7 @@ fun OptionsDialog(
                             selected = option == selected,
                             onClick = null,
                         )
-                        Text(option, fontFamily = RetroType.Mono)
+                        Text(option, fontFamily = AppType.Sans)
                     }
                 }
             }
@@ -951,7 +953,7 @@ private fun FilterHandleBar(filterName: String, onOpen: () -> Unit) {
         Spacer(Modifier.width(8.dp))
         Text(
             text = filterName.uppercase(),
-            fontFamily = RetroType.Mono,
+            fontFamily = AppType.Sans,
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onBackground,
         )
@@ -995,7 +997,7 @@ private fun FilterDrawer(
         ) {
             Text(
                 text = "FILTERS",
-                fontFamily = RetroType.Mono,
+                fontFamily = AppType.Sans,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
@@ -1024,7 +1026,7 @@ private fun FilterDrawer(
             if (shown.isEmpty()) {
                 Text(
                     text = "no filter matches \"$query\"",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(vertical = 12.dp),
@@ -1033,7 +1035,7 @@ private fun FilterDrawer(
             if (showHint) {
                 Text(
                     text = "swipe filters · long-press ★ to pin",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -1063,7 +1065,7 @@ private fun FilterDrawer(
                 Spacer(Modifier.width(8.dp))
                 Text(
                     "FILTER LAB · MAKE YOUR OWN",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -1076,7 +1078,7 @@ private fun FilterDrawer(
             if (hasSize) {
                 Text(
                     text = "SIZE $sizeLabel",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                 )
@@ -1138,7 +1140,7 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
 private fun ModePill(label: String, active: Boolean, onClick: () -> Unit) {
     Text(
         text = label,
-        fontFamily = RetroType.Mono,
+        fontFamily = AppType.Sans,
         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         color = if (active) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
@@ -1272,7 +1274,7 @@ private fun PermissionEmptyState(onGrant: () -> Unit, onOpenSettings: () -> Unit
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
             Text(
                 text = "▓▓▓ NO SIGNAL ▓▓▓",
-                fontFamily = RetroType.Mono,
+                fontFamily = AppType.Sans,
                 color = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.height(12.dp))

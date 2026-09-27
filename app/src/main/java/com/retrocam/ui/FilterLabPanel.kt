@@ -53,7 +53,14 @@ import com.retrocam.catalog.lab.STAMP_POSITIONS
 import com.retrocam.catalog.lab.effectValue
 import com.retrocam.catalog.lab.LabTemplates
 import com.retrocam.catalog.lab.SavedRecipe
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.components.ButtonSize
+import com.retrocam.ui.components.ButtonVariant
+import com.retrocam.ui.components.ShadcnButton
+import com.retrocam.ui.theme.ShadcnColor
+import com.retrocam.ui.components.ShadcnInput
+import com.retrocam.ui.components.ShadcnLabel
+import com.retrocam.ui.components.ShadcnSlider
+import com.retrocam.ui.theme.AppType
 
 /**
  * Filter Lab. Composed *below* the live viewfinder rather than over it, so the
@@ -147,11 +154,11 @@ fun FilterLabPanel(
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onResetAll) {
-                    Text("RESET ALL", fontFamily = RetroType.Mono, fontSize = 11.sp, color = dim)
+                    Text("RESET ALL", fontFamily = AppType.Sans, fontSize = 11.sp, color = dim)
                 }
             }
             Spacer(Modifier.height(4.dp))
-            Text("EFFECTS", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            Text("EFFECTS", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             LAB_EFFECTS.forEachIndexed { i, e ->
                 val v = recipe.effectValue(i)
                 LabSlider(
@@ -165,7 +172,7 @@ fun FilterLabPanel(
                 DuotoneColours(recipe, accent, dim, onDuoColour)
             }
             Spacer(Modifier.height(4.dp))
-            Text("3D LUT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            Text("3D LUT", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             if (recipe.lutId != null) {
                 LabSlider(
                     "LUT AMOUNT", recipe.lutAmount, 0f, 1f, accent, dim,
@@ -198,21 +205,10 @@ fun FilterLabPanel(
             LabSectionToggle("1990s DATE STAMP", !recipe.stampText.isNullOrBlank(), accent, dim, onToggleStamp)
             val stampText = recipe.stampText
             if (!stampText.isNullOrBlank()) {
-                TextField(
+                ShadcnInput(
                     value = stampText,
                     onValueChange = onStampText,
-                    singleLine = true,
-                    textStyle = androidx.compose.ui.text.TextStyle(
-                        fontFamily = RetroType.Mono,
-                        fontSize = 13.sp,
-                    ),
-                    shape = RoundedCornerShape(50),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    ),
+                    placeholder = "'98 08 13",
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 )
                 SwatchRow(
@@ -223,7 +219,7 @@ fun FilterLabPanel(
                 LabSlider("STAMP OPACITY", recipe.stampAlpha, 0f, 1f, accent, dim, onStampAlpha)
             }
             Spacer(Modifier.height(8.dp))
-            Text("WATERMARK", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            Text("WATERMARK", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
                     TemplateChip("NONE", recipe.watermarkId == null, accent, dim) { onPickWatermark(null) }
@@ -244,14 +240,14 @@ fun FilterLabPanel(
                 LabSlider("MARK OPACITY", recipe.watermarkAlpha, 0f, 1f, accent, dim, onWatermarkAlpha)
             }
             Spacer(Modifier.height(10.dp))
-            Text("PALETTE FROM FRAME", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            Text("PALETTE FROM FRAME", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onExtractPalette) {
-                    Text("EXTRACT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = accent)
+                    Text("EXTRACT", fontFamily = AppType.Sans, fontSize = 10.sp, color = accent)
                 }
                 if (palette.isNotEmpty()) {
                     SwatchRow(palette, -1, accent, dim) { onApplyPaletteColour(it, true) }
@@ -260,7 +256,7 @@ fun FilterLabPanel(
             if (palette.isNotEmpty()) {
                 Text(
                     "tap a swatch to use it as the duotone shadow",
-                    fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim,
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
                 )
             }
         }
@@ -269,26 +265,19 @@ fun FilterLabPanel(
 
         // ---- name + save ----
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextField(
+            ShadcnInput(
                 value = name,
                 onValueChange = onName,
-                singleLine = true,
-                placeholder = { Text("NAME IT", fontFamily = RetroType.Mono, fontSize = 12.sp) },
-                textStyle = androidx.compose.ui.text.TextStyle(
-                    fontFamily = RetroType.Mono,
-                    fontSize = 13.sp,
-                ),
-                shape = RoundedCornerShape(50),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surface,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                ),
+                placeholder = "Name it",
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
-            LabButton("SAVE", enabled = canSave, accent = accent, onClick = onSave)
+            ShadcnButton(
+                text = "Save",
+                onClick = onSave,
+                enabled = canSave,
+                variant = if (canSave) ButtonVariant.Default else ButtonVariant.Outline,
+            )
         }
 
         // ---- the bridge: hand the draft to the camera ----
@@ -296,31 +285,20 @@ fun FilterLabPanel(
         // here, so this is the one action that crosses between them.
         if (selectedRecipeId != null) {
             Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable { onUse(selectedRecipeId) }
-                    .padding(vertical = 13.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Filled.Send,
-                    contentDescription = null,
-                    tint = Color.Black,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "USE IN CAMERA",
-                    fontFamily = RetroType.Mono,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    color = Color.Black,
-                )
-            }
+            ShadcnButton(
+                text = "Use in camera",
+                onClick = { onUse(selectedRecipeId) },
+                modifier = Modifier.fillMaxWidth(),
+                size = ButtonSize.Lg,
+                leading = {
+                    Icon(
+                        Icons.Filled.Send,
+                        contentDescription = null,
+                        tint = ShadcnColor.PrimaryForeground,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+            )
         }
 
         // ---- saved recipes ----
@@ -331,10 +309,10 @@ fun FilterLabPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("MY RECIPES", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+                Text("MY RECIPES", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
                 Text(
                     "+ IMPORT QR",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     fontSize = 10.sp,
                     color = accent,
                     modifier = Modifier.clickable(onClick = onImportQr).padding(4.dp),
@@ -362,7 +340,7 @@ fun FilterLabPanel(
                     ) {
                         Text(
                             r.name,
-                            fontFamily = RetroType.Mono,
+                            fontFamily = AppType.Sans,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                             fontSize = 12.sp,
                             color = if (selected) MaterialTheme.colorScheme.primary
@@ -405,7 +383,7 @@ private fun LabTab(
     ) {
         Text(
             label,
-            fontFamily = RetroType.Mono,
+            fontFamily = AppType.Sans,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             fontSize = 11.sp,
             color = if (selected) androidx.compose.ui.graphics.Color.Black else accent,
@@ -433,7 +411,7 @@ private fun LabButton(
     ) {
         Text(
             label,
-            fontFamily = RetroType.Mono,
+            fontFamily = AppType.Sans,
             fontWeight = FontWeight.Bold,
             fontSize = 12.sp,
             color = if (enabled) androidx.compose.ui.graphics.Color.Black else accent.copy(alpha = 0.4f),
@@ -459,7 +437,7 @@ private fun LabSlider(
     onReset: (() -> Unit)? = null,
 ) {
     val atNeutral = neutral != null && kotlin.math.abs(value - neutral) < 1e-4f
-    Column(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -473,32 +451,28 @@ private fun LabSlider(
                     Modifier
                 },
             ) {
-                Text(
-                    label,
-                    fontFamily = RetroType.Mono,
-                    fontSize = 10.sp,
-                    color = if (atNeutral) dim else accent,
-                )
+                // shadcn's Label: small, muted, and it stays muted when at neutral
+                // rather than changing colour, so the value is the only thing that
+                // moves.
+                ShadcnLabel(text = label, color = dim)
                 if (onReset != null && !atNeutral) {
-                    Text("  reset", fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim)
+                    Text("  reset", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
                 }
             }
+            // Numeric readout, so this is the one place the mono role earns its
+            // keep: aligned digits that do not jitter as the value changes.
             Text(
                 formatKnob(value),
-                fontFamily = RetroType.Terminal,
-                fontSize = 15.sp,
-                color = if (atNeutral) dim else accent,
+                fontFamily = AppType.Mono,
+                fontSize = 13.sp,
+                color = if (atNeutral) dim else ShadcnColor.Foreground,
             )
         }
-        Slider(
+        ShadcnSlider(
             value = value.coerceIn(min, max),
             onValueChange = onChange,
             valueRange = min..max,
-            colors = SliderDefaults.colors(
-                thumbColor = accent,
-                activeTrackColor = accent,
-                inactiveTrackColor = MaterialTheme.colorScheme.surface,
-            ),
+            label = label,
         )
     }
 }
@@ -573,7 +547,7 @@ private fun CategoryChip(
     ) {
         Text(
             label,
-            fontFamily = RetroType.Mono,
+            fontFamily = AppType.Sans,
             fontSize = 9.sp,
             color = if (selected) accent else dim,
         )
@@ -609,7 +583,7 @@ private fun TemplateChip(
     ) {
         Text(
             label,
-            fontFamily = RetroType.Mono,
+            fontFamily = AppType.Sans,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
             fontSize = 10.sp,
             color = if (selected) androidx.compose.ui.graphics.Color.Black else MaterialTheme.colorScheme.onBackground,
@@ -634,9 +608,9 @@ private fun DuotoneColours(
         0xFF7F1D1D.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt(),
     )
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text("DUO SHADOW", fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim)
+        Text("DUO SHADOW", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
         SwatchRow(swatches, recipe.duotoneShadow, accent, dim) { onPick(true, it) }
-        Text("DUO HIGHLIGHT", fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim)
+        Text("DUO HIGHLIGHT", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
         SwatchRow(swatches, recipe.duotoneHighlight, accent, dim) { onPick(false, it) }
     }
 }
@@ -692,8 +666,8 @@ private fun LabSectionToggle(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(label, fontFamily = RetroType.Mono, fontSize = 10.sp, color = if (on) accent else dim)
-        Text(if (on) "ON" else "OFF", fontFamily = RetroType.Mono, fontSize = 10.sp, color = if (on) accent else dim)
+        Text(label, fontFamily = AppType.Sans, fontSize = 10.sp, color = if (on) accent else dim)
+        Text(if (on) "ON" else "OFF", fontFamily = AppType.Sans, fontSize = 10.sp, color = if (on) accent else dim)
     }
 }
 
@@ -705,7 +679,7 @@ private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, o
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) {
-        Text(label, fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+        Text(label, fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
     }
 }
 

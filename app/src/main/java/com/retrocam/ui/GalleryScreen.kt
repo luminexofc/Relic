@@ -42,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.theme.AppType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -74,7 +74,8 @@ fun GalleryScreen(saveDir: String, onBack: () -> Unit) {
             }
             Text(
                 "ALBUM",
-                fontFamily = RetroType.Display,
+                fontFamily = AppType.Sans,
+                fontWeight = AppType.Strong,
                 fontSize = 18.sp,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.padding(start = 4.dp),
@@ -85,7 +86,7 @@ fun GalleryScreen(saveDir: String, onBack: () -> Unit) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     "NO SHOTS YET",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                     textAlign = TextAlign.Center,
                 )

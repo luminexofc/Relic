@@ -68,8 +68,7 @@ The visual targets the shaders were tuned against:
 
 **Interface**
 
-- Retro dark theme (`RetroOrange` / `AlertPink` on near-black), monospace typography
-- Bundled fonts: **Press Start 2P**, **VT323**, **Space Mono** (all SIL Open Font License 1.1)
+- shadcn-style design system: Radix `neutral` token set, 8px radius scale, platform UI/mono type roles, Radix motion timings
 - Micro-interactions throughout, with a full **reduced motion** respect path
 - In-app **diagnostics** readout: texture-grab ms and frame ms
 
@@ -93,7 +92,7 @@ The visual targets the shaders were tuned against:
 | `renderer` | `FilterRenderer`: `EGL10` offscreen context, program cache, `renderChain`, the fullscreen quad, the glyph ramp for ASCII, and the video encoder bridge. |
 | `camera` | CameraX controller — binding, front/back, torch, exposure range, rotation. |
 | `core/datastore` | `SettingsRepository`, every persisted key. |
-| `core/designsystem` | `RetroCamTheme` and motion tokens. |
+| `core/designsystem` | `RetroCamTheme`, the shadcn token set (`Tokens.kt`), the component set (`components/`) and motion tokens. |
 | `app` | Compose camera UI, filter drawer, settings, gallery, photo cards. |
 
 ### How a filter works

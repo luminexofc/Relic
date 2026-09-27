@@ -1,6 +1,6 @@
 package com.retrocam.ui
 
-import com.retrocam.ui.theme.RetroType
+import com.retrocam.ui.theme.AppType
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -93,13 +93,13 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
             Column {
                 Text(
                     "RetroCam",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.titleLarge,
                     color = Color.White,
                 )
                 Text(
                     "Settings",
-                    fontFamily = RetroType.Mono,
+                    fontFamily = AppType.Sans,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                 )
@@ -136,7 +136,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                 Icon(Icons.Filled.Favorite, null, tint = Color.White)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Photo Card", fontFamily = RetroType.Mono, color = Color.White)
+                    Text("Photo Card", fontFamily = AppType.Sans, color = Color.White)
                     Text(
                         "Polaroid frame baked into saved photos",
                         style = MaterialTheme.typography.bodySmall,
@@ -166,7 +166,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                 Icon(Icons.Filled.Visibility, null, tint = Color.White)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Preview", fontFamily = RetroType.Mono, color = Color.White)
+                    Text("Preview", fontFamily = AppType.Sans, color = Color.White)
                     Text(
                         "Show filter preview before capture",
                         style = MaterialTheme.typography.bodySmall,
@@ -242,7 +242,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                 Column {
                     Text(
                         "Reset Settings",
-                        fontFamily = RetroType.Mono,
+                        fontFamily = AppType.Sans,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     Text(
@@ -298,7 +298,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
 private fun SectionLabel(text: String) {
     Text(
         text = text,
-        fontFamily = RetroType.Mono,
+        fontFamily = AppType.Sans,
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
@@ -330,7 +330,7 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
         Icon(icon, contentDescription = null, tint = Color.White)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(title, fontFamily = RetroType.Mono, color = Color.White)
+            Text(title, fontFamily = AppType.Sans, color = Color.White)
             Text(
                 subtitle,
                 style = MaterialTheme.typography.bodySmall,
