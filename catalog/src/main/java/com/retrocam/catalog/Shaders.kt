@@ -63,6 +63,13 @@ object Shaders {
         uniform vec3 u_duoShadow;
         uniform vec3 u_duoHighlight;
 
+        // Filter Lab colour correction that a 4x5 matrix cannot express: a power
+        // curve and a luminance-keyed split tone.
+        uniform float u_gamma;
+        uniform float u_splitAmount;
+        uniform vec3 u_shadowTint;
+        uniform vec3 u_highlightTint;
+
         // Filter Lab 3D LUT (a Hald CLUT). u_lutAmount 0 leaves it unbound.
         uniform sampler2D u_lut;
         uniform float u_lutAmount;
@@ -953,6 +960,24 @@ object Shaders {
                 ) + 0.5;
                 vec3 mapped = texture2D(u_lut, px / (u_lutGrid * u_lutCube)).rgb;
                 c = mix(c, mapped, u_lutAmount);
+            }
+
+            // --- gamma: midtone power curve, applied as 1/gamma so that raising
+            // it brightens, which is how every photo tool presents it ---
+            if (abs(u_gamma - 1.0) > 0.001) {
+                vec3 g = vec3(1.0 / max(u_gamma, 0.001));
+                c = pow(max(c, vec3(0.0)), g);
+            }
+
+            // --- split tone: pull a tint into the shadows and another into the
+            // highlights, keyed off luminance. Mirrored about mid grey so the two
+            // ends cannot both push the same way. ---
+            if (u_splitAmount > 0.0) {
+                float l = luminance(c);
+                vec3 tint = mix(u_shadowTint, u_highlightTint, smoothstep(0.0, 1.0, l));
+                // A tint at 0.5 grey is a no-op, so this shifts hue without
+                // dragging overall brightness with it.
+                c = mix(c, c * (tint * 2.0), u_splitAmount);
             }
 
             // --- duotone: luminance ramp between the two chosen colours ---

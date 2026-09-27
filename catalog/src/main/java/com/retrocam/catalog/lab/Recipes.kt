@@ -41,6 +41,7 @@ data class SavedRecipe(
                 lab.adjustments.describe().takeIf { it != "no grading" },
                 lab.activeEffects().takeIf { it.isNotEmpty() }?.joinToString(" "),
                 lab.lutId?.removePrefix("lut_")?.take(6),
+                lab.lutId?.removePrefix("lut_")?.take(6),
                 "over ${base.displayName}",
             ).joinToString(", "),
             lab = lab,
@@ -86,7 +87,11 @@ data class SavedRecipe(
                 append(lab.duotoneShadow).append(',')
                 append(lab.duotoneHighlight).append('|')
                 append(lab.lutId ?: "-").append(',')
-                append(RecipeCodec.q(lab.lutAmount)).append('|')
+                append(RecipeCodec.q(lab.lutAmount)).append(',')
+                append(RecipeCodec.q(lab.gamma)).append(',')
+                append(RecipeCodec.q(lab.splitAmount)).append(',')
+                append(lab.shadowTint).append(',')
+                append(lab.highlightTint).append('|')
                 append(lab.stampText ?: "-").append('|')
                 append(lab.stampColor).append('|')
                 append(lab.stampPosition.ordinal).append('|')
@@ -129,10 +134,10 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 4
+    const val VERSION = 5
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 27
+    private const val FIELD_COUNT = 31
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -149,6 +154,8 @@ object RecipeCodec {
             q(lab.vignette), q(lab.grain), q(lab.sharpen), q(lab.blur), q(lab.glitch), q(lab.duotone),
             r.lab.duotoneShadow.toString(), r.lab.duotoneHighlight.toString(),
             r.lab.lutId ?: "-", q(lab.lutAmount),
+            q(lab.gamma), q(lab.splitAmount),
+            lab.shadowTint.toString(), lab.highlightTint.toString(),
             r.lab.stampText?.let { b64.encodeToString(it.toByteArray()) } ?: "-",
             r.lab.stampColor.toString(),
             r.lab.stampPosition.ordinal.toString(),
@@ -192,20 +199,24 @@ object RecipeCodec {
                     lutAmount = parts[18].toFloat(),
                     // Free text again, so it gets the same base64 treatment as the
                     // recipe name rather than being trusted to avoid separators.
-                    stampText = parts[19].takeIf { it != "-" }?.let { String(unb64.decode(it)) },
-                    stampColor = parts[20].toInt(),
-                    stampPosition = StampPosition.entries.getOrElse(parts[21].toInt()) {
+                    gamma = parts[19].toFloat(),
+                    splitAmount = parts[20].toFloat(),
+                    shadowTint = parts[21].toInt(),
+                    highlightTint = parts[22].toInt(),
+                    stampText = parts[23].takeIf { it != "-" }?.let { String(unb64.decode(it)) },
+                    stampColor = parts[24].toInt(),
+                    stampPosition = StampPosition.entries.getOrElse(parts[25].toInt()) {
                         StampPosition.BOTTOM_RIGHT
                     },
-                    stampAlpha = parts[22].toFloat(),
-                    watermarkId = parts[23].takeIf { it != "-" },
-                    watermarkAlpha = parts[24].toFloat(),
-                    watermarkPosition = StampPosition.entries.getOrElse(parts[25].toInt()) {
+                    stampAlpha = parts[26].toFloat(),
+                    watermarkId = parts[27].takeIf { it != "-" },
+                    watermarkAlpha = parts[28].toFloat(),
+                    watermarkPosition = StampPosition.entries.getOrElse(parts[29].toInt()) {
                         StampPosition.BOTTOM_RIGHT
                     },
                     // Unused today, reserved so a future field can be appended
                     // without reinterpreting every existing payload.
-                    _reserved = parts[26],
+                    _reserved = parts[30],
                 ),
             )
             SavedRecipe(

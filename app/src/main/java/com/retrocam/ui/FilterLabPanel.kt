@@ -101,6 +101,7 @@ fun FilterLabPanel(
     onWatermarkAlpha: (Float) -> Unit,
     onExtractPalette: () -> Unit,
     onApplyPaletteColour: (Int, Boolean) -> Unit,
+    onSplitTint: (Boolean, Int) -> Unit,
     onShare: (String) -> Unit,
     onImportQr: () -> Unit,
     onDeleteLut: (String) -> Unit,
@@ -148,6 +149,8 @@ fun FilterLabPanel(
                     2 -> recipe.adjustments.saturation
                     3 -> recipe.adjustments.warmth
                     4 -> recipe.adjustments.tint
+                    5 -> recipe.gamma
+                    6 -> recipe.splitAmount
                     else -> k.neutral
                 }
                 LabSlider(k.label, v, k.min, k.max, accent, dim, { onKnob(i, it) }, neutral = k.neutral, onReset = { onResetKnob(i) })
@@ -160,6 +163,15 @@ fun FilterLabPanel(
                     size = ButtonSize.Sm,
                 )
             }
+            if (recipe.splitAmount > 0f) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Text("SHADOW TINT", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+                    SwatchRow(TINT_SWATCHES, recipe.shadowTint, accent, dim) { onSplitTint(true, it) }
+                    Text("HIGHLIGHT TINT", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+                    SwatchRow(TINT_SWATCHES, recipe.highlightTint, accent, dim) { onSplitTint(false, it) }
+                }
+            }
+
             Spacer(Modifier.height(4.dp))
             Text("EFFECTS", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
             LAB_EFFECTS.forEachIndexed { i, e ->
@@ -635,6 +647,12 @@ private fun TemplateChip(
  * Duotone shadow/highlight swatches. Not a full colour picker: two presets plus
  * a hue slider would be a whole screen, and duotone only needs two anchors.
  */
+/** Muted split-tone anchors. Anything strong would just tint the whole frame. */
+private val TINT_SWATCHES = listOf(
+    0xFF808080.toInt(), 0xFF2A3A5A.toInt(), 0xFF1B4332.toInt(),
+    0xFF5A4632.toInt(), 0xFF3A2A4A.toInt(), 0xFF4A2A2A.toInt(),
+)
+
 @Composable
 private fun DuotoneColours(
     recipe: com.retrocam.catalog.lab.LabRecipe,

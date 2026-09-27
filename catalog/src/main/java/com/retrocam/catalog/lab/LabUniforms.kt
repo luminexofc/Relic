@@ -31,6 +31,10 @@ data class LabUniforms(
     /** `[x0,y0,x1,y1]` in frame UV, or [NO_RECT] for no watermark. */
     val markRect: FloatArray,
     val markAlpha: Float,
+    val gamma: Float,
+    val splitAmount: Float,
+    val shadowTint: FloatArray,
+    val highlightTint: FloatArray,
 ) {
     companion object {
         /** A zero-width rect, which the shader treats as "nothing to draw". */
@@ -89,6 +93,10 @@ data class LabUniforms(
                 OverlayPlacement.rect(recipe.watermarkPosition, markAspect, OverlayPlacement.MARK_PAD, OverlayPlacement.MARK_PAD)
             },
             markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
+            gamma = recipe.gamma.coerceIn(0.2f, 3f),
+            splitAmount = recipe.splitAmount.coerceIn(0f, 1f),
+            shadowTint = unpackRgb(recipe.shadowTint),
+            highlightTint = unpackRgb(recipe.highlightTint),
         )
     }
 }

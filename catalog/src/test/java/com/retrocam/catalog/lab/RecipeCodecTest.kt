@@ -33,7 +33,7 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "4",
+        version: String = "5",
         name: String = "X",
         base: String = "original",
         template: String = "-",
@@ -41,9 +41,10 @@ class RecipeCodecTest {
         effects: List<String> = List(6) { "0" },
         colours: List<String> = listOf("0", "255"),
         lut: List<String> = listOf("-", "0"),
+        colour: List<String> = listOf("1", "0", "0", "0"),
         stamp: List<String> = listOf("-", "0", "4", "1", "-", "0", "4"),
         reserved: String = "0",
-    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut + stamp + reserved)
+    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut + colour + stamp + reserved)
         .joinToString(",")
 
     @Test
@@ -58,7 +59,7 @@ class RecipeCodecTest {
         // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(27, enc.split(',').size, "bad field count in '$enc'")
+        assertEquals(31, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
     }
 
@@ -74,6 +75,33 @@ class RecipeCodecTest {
             ),
         )
         assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `gamma and split tone survive a round trip`() {
+        val r = SavedRecipe.create(
+            "SPLIT", "original",
+            LabRecipe(
+                gamma = 1.35f, splitAmount = 0.4f,
+                shadowTint = 0xFF203040.toInt(), highlightTint = 0xFF403020.toInt(),
+            ),
+        )
+        assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `gamma and split are clamped on decode`() {
+        val wild = payload(colour = listOf("99", "-3", "0", "0"))
+        val r = assertNotNull(RecipeCodec.decode(wild)).lab
+        assertTrue(r.gamma in 0.2f..3f, "gamma was ${r.gamma}")
+        assertEquals(0f, r.splitAmount)
+    }
+
+    @Test
+    fun `recipes differing only by gamma get different ids`() {
+        val a = SavedRecipe.create("G", "original", LabRecipe(gamma = 1.2f))
+        val b = SavedRecipe.create("G", "original", LabRecipe(gamma = 1.4f))
+        assertTrue(a.id != b.id, "gamma must be part of the content hash")
     }
 
     @Test

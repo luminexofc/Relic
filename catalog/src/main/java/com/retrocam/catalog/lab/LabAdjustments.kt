@@ -47,6 +47,10 @@ data class LabAdjustments(
             Knob("SATURATION", 0f, 3f, 1f),
             Knob("WARMTH", -1f, 1f, 0f),
             Knob("TINT", -1f, 1f, 0f),
+            // Not matrix-representable, but they sit with the other colour knobs
+            // in the UI, so the ranges live here too.
+            Knob("GAMMA", 0.2f, 3f, 1f),
+            Knob("SPLIT TONE", 0f, 1f, 0f),
         )
     }
 }

@@ -265,6 +265,7 @@ fun LabScreen(viewModel: CameraViewModel) {
             onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
             onExtractPalette = viewModel::extractPalette,
             onApplyPaletteColour = viewModel::applyPaletteColour,
+            onSplitTint = viewModel::setLabSplitTint,
             onShare = viewModel::shareRecipe,
             onImportQr = { qrPicker.launch("image/*") },
             onDeleteLut = viewModel::deleteLut,

@@ -649,6 +649,15 @@ class CameraViewModel @Inject constructor(
                 4 -> a.copy(tint = value.coerceIn(k.min, k.max))
                 else -> a
             }
+            // Indices 5 and 6 are not part of LabAdjustments: gamma is a power
+            // curve and split tone is luminance-keyed, so neither can ride in the
+            // 4x5 colour matrix. They live on the recipe instead.
+            if (which == 5) return@update s.copy(
+                labRecipe = s.labRecipe.copy(gamma = value.coerceIn(k.min, k.max)),
+            )
+            if (which == 6) return@update s.copy(
+                labRecipe = s.labRecipe.copy(splitAmount = value.coerceIn(k.min, k.max)),
+            )
             s.copy(labRecipe = s.labRecipe.copy(adjustments = next))
         }
     }
@@ -711,6 +720,19 @@ class CameraViewModel @Inject constructor(
     fun uploadLut(id: String, renderer: FilterRenderer?) {
         val px = lutStore.pixelsFor(id) ?: return
         renderer?.queueLutUpload(id, px.pixels, px.side, px.cube)
+    }
+
+    /** Split-tone anchor colours. [shadow] picks which of the two tints. */
+    fun setLabSplitTint(shadow: Boolean, argb: Int) {
+        _uiState.update {
+            it.copy(
+                labRecipe = if (shadow) {
+                    it.labRecipe.copy(shadowTint = argb)
+                } else {
+                    it.labRecipe.copy(highlightTint = argb)
+                },
+            )
+        }
     }
 
     /** [shadow] true for the shadow anchor, false for the highlight. Packed ARGB. */

@@ -43,6 +43,22 @@ data class LabRecipe(
     val lutId: String? = null,
     /** Blend toward the LUT, 0..1. */
     val lutAmount: Float = 0f,
+    // ---- colour correction that a 4x5 matrix cannot express ----
+    /**
+     * Midtone power curve. 1 is neutral, below 1 lifts the midtones, above crushes
+     * them. A power law is not affine, so this cannot live in the colour matrix and
+     * runs as a shader step after the grade.
+     */
+    val gamma: Float = 1f,
+    /**
+     * How strongly the shadow and highlight tints are applied, 0..1. Split toning
+     * is a function of luminance, which is also non-linear.
+     */
+    val splitAmount: Float = 0f,
+    /** Packed ARGB tint pulled into the shadows. */
+    val shadowTint: Int = DEFAULT_SHADOW_TINT,
+    /** Packed ARGB tint pulled into the highlights. */
+    val highlightTint: Int = DEFAULT_HIGHLIGHT_TINT,
     // ---- overlays ----
     /**
      * Date stamp text, or null for no stamp. The text is rasterised on the CPU
@@ -84,6 +100,8 @@ data class LabRecipe(
         if (glitch > 0f) add("glitch")
         if (duotone > 0f) add("duotone")
         if (lutId != null && lutAmount > 0f) add("lut")
+        if (gamma != 1f) add("gamma")
+        if (splitAmount > 0f) add("split tone")
         if (!stampText.isNullOrBlank()) add("date stamp")
         if (watermarkId != null) add("watermark")
     }
@@ -99,6 +117,14 @@ data class LabRecipe(
          */
         const val DEFAULT_DUO_SHADOW = 0xFF141450.toInt()  // rgb(20, 20, 80)
         const val DEFAULT_DUO_HIGHLIGHT = 0xFFFF6E50.toInt()  // rgb(255, 110, 80)
+
+        /**
+         * Split-tone defaults are deliberately mild: a cool shadow and a warm
+         * highlight is the classic film look, but at full strength it flattens, so
+         * the amount slider rather than the colour carries the weight.
+         */
+        const val DEFAULT_SHADOW_TINT = 0xFF2A3A5A.toInt()  // cool slate
+        const val DEFAULT_HIGHLIGHT_TINT = 0xFF5A4632.toInt()  // warm amber
 
         /**
          * Clamp every field into range. Applied on decode, so a hand-edited or
@@ -117,6 +143,10 @@ data class LabRecipe(
             duotoneHighlight = r.duotoneHighlight,
             lutId = r.lutId,
             lutAmount = r.lutAmount.coerceIn(0f, 1f),
+            gamma = r.gamma.coerceIn(0.2f, 3f),
+            splitAmount = r.splitAmount.coerceIn(0f, 1f),
+            shadowTint = r.shadowTint,
+            highlightTint = r.highlightTint,
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

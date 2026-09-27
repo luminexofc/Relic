@@ -68,6 +68,10 @@ class FilterRenderer(
         val uDuotone: Int,
         val uDuoShadow: Int,
         val uDuoHighlight: Int,
+        val uGamma: Int,
+        val uSplitAmount: Int,
+        val uShadowTint: Int,
+        val uHighlightTint: Int,
         val uLut: Int,
         val uLutAmount: Int,
         val uLutCube: Int,
@@ -626,6 +630,10 @@ class FilterRenderer(
                 uDuotone = GLES20.glGetUniformLocation(p, "u_duotone"),
                 uDuoShadow = GLES20.glGetUniformLocation(p, "u_duoShadow"),
                 uDuoHighlight = GLES20.glGetUniformLocation(p, "u_duoHighlight"),
+                uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
+                uSplitAmount = GLES20.glGetUniformLocation(p, "u_splitAmount"),
+                uShadowTint = GLES20.glGetUniformLocation(p, "u_shadowTint"),
+                uHighlightTint = GLES20.glGetUniformLocation(p, "u_highlightTint"),
                 uLut = GLES20.glGetUniformLocation(p, "u_lut"),
                 uLutAmount = GLES20.glGetUniformLocation(p, "u_lutAmount"),
                 uLutCube = GLES20.glGetUniformLocation(p, "u_lutCube"),
@@ -903,6 +911,10 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uDuotone, u.duotone)
             GLES20.glUniform3f(prog.uDuoShadow, u.duotoneShadow[0], u.duotoneShadow[1], u.duotoneShadow[2])
             GLES20.glUniform3f(prog.uDuoHighlight, u.duotoneHighlight[0], u.duotoneHighlight[1], u.duotoneHighlight[2])
+            GLES20.glUniform1f(prog.uGamma, u.gamma)
+            GLES20.glUniform1f(prog.uSplitAmount, u.splitAmount)
+            GLES20.glUniform3f(prog.uShadowTint, u.shadowTint[0], u.shadowTint[1], u.shadowTint[2])
+            GLES20.glUniform3f(prog.uHighlightTint, u.highlightTint[0], u.highlightTint[1], u.highlightTint[2])
             // A recipe naming a LUT we do not hold (someone else's recipe, or an
             // import we have not downloaded) still grades: amount stays 0 and the
             // rest of the recipe works.
