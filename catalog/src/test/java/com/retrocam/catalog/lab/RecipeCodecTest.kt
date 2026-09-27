@@ -34,13 +34,44 @@ class RecipeCodecTest {
     }
 
     @Test
-    fun `encoded form has exactly nine fields even though the numbers are decimal`() {
+    fun `encoded form has the expected field count even though the numbers are decimal`() {
         // Regression guard. The separator was originally a dot, which split every
-        // decimal knob in half and turned 9 fields into 14, so every decode
+        // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(9, enc.split(',').size, "bad field count in '$enc'")
+        assertEquals(17, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
+    }
+
+    @Test
+    fun `effect amounts survive a round trip`() {
+        val r = SavedRecipe.create(
+            "GRIT", "crt",
+            LabRecipe(
+                "SEPIA", LabAdjustments(0.1f, 1.1f, 0.9f, 0.2f, 0f),
+                vignette = 0.4f, grain = 0.3f, sharpen = 0.2f,
+                blur = 0.1f, glitch = 0.05f, duotone = 0.6f,
+                duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
+            ),
+        )
+        assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `recipes differing only by an effect get different ids`() {
+        val plain = recipe()
+        val grainy = SavedRecipe.create("SUNSET 94", "original", plain.lab.copy(grain = 0.5f))
+        assertTrue(plain.id != grainy.id, "grain must be part of the content hash")
+    }
+
+    @Test
+    fun `effect amounts are clamped on decode`() {
+        val wild = "2,${b64("X")},original,-,0,1,1,0,0,9,-9,9,-9,9,-9,-1,999999999"
+        val back = assertNotNull(RecipeCodec.decode(wild))
+        val r = back.lab
+        assertEquals(1f, r.vignette); assertEquals(0f, r.grain)
+        assertEquals(1f, r.sharpen); assertEquals(0f, r.blur)
+        assertEquals(1f, r.glitch); assertEquals(0f, r.duotone)
     }
 
     @Test
@@ -102,12 +133,14 @@ class RecipeCodecTest {
             ",",
             "1",
             "1,a,b",                                   // too few fields
-            "1,QUJD,original,-,0,1,1,0,0,9",           // too many fields
-            "2,QUJD,original,-,0,1,1,0,0",             // wrong version
-            "1,!!!!,original,-,0,1,1,0,0",             // bad base64
-            "1,QUJD,original,-,x,1,1,0,0",             // unparseable float
-            "1,,original,-,0,1,1,0,0",                 // empty name
-            "1," + "A".repeat(4000) + ",original,-,0,1,1,0,0", // oversized
+            "1,QUJD,original",                         // truncated
+            "1,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,9", // too many fields
+            "1,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // wrong version (v1)
+            "3,QUJD,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // future version
+            "1,!!!!,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0",   // bad base64
+            "1,QUJD,original,-,x,1,1,0,0,0,0,0,0,0,0,0,0,0",   // unparseable float
+            "1,,original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0",     // empty name
+            "1," + "A".repeat(4000) + ",original,-,0,1,1,0,0,0,0,0,0,0,0,0,0,0", // oversized
         )
         for (s in junk) {
             assertNull(RecipeCodec.decode(s), "should not decode: '$s'")
@@ -117,7 +150,7 @@ class RecipeCodecTest {
     @Test
     fun `hostile knob values are clamped not rejected`() {
         // A hand-edited string should degrade to a usable filter, not vanish.
-        val wild = "1,${b64("X")},original,-,99,99,-5,50,-50"
+        val wild = "2,${b64("X")},original,-,99,99,-5,50,-50,99,-99,99,-99,99,-99,0,255"
         val back = assertNotNull(RecipeCodec.decode(wild))
         val a = back.lab.adjustments
         assertTrue(a.brightness <= 1f, "brightness not clamped")

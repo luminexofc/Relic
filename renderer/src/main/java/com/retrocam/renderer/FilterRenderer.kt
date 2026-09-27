@@ -13,7 +13,7 @@ import android.util.Log
 import android.media.MediaRecorder
 import com.retrocam.catalog.FilterSpec
 import com.retrocam.catalog.Shaders
-import com.retrocam.catalog.lab.LabGrading
+import com.retrocam.catalog.lab.LabUniforms
 import com.retrocam.catalog.lab.LabRecipe
 import com.retrocam.catalog.lab.LabShaderSpec
 import java.nio.ByteBuffer
@@ -59,6 +59,14 @@ class FilterRenderer(
         val uCcmR1: Int,
         val uCcmR2: Int,
         val uCcmOffset: Int,
+        val uVignette: Int,
+        val uGrain: Int,
+        val uSharpen: Int,
+        val uBlur: Int,
+        val uGlitch: Int,
+        val uDuotone: Int,
+        val uDuoShadow: Int,
+        val uDuoHighlight: Int,
         val aPosition: Int,
         val aTexCoord: Int,
     )
@@ -342,6 +350,11 @@ class FilterRenderer(
             val spec = currentSpec ?: return
             val recipe = recipeLinks(spec, currentIntensity)
             if (recipe != null) {
+                // A temporal base (TRAILS) has to advance its feedback buffer
+                // before the chain runs, or the trails freeze on frame one: the
+                // chain's link 0 re-renders the base into an FBO and the lab link
+                // reads that, so nothing else would do the ping-pong.
+                if (spec.temporal) accumulateTrails(spec, currentIntensity)
                 renderChain(recipe, surfaceWidth, surfaceHeight, toScreen = true)
             } else {
                 drawToScreen(spec, currentIntensity, surfaceWidth, surfaceHeight)
@@ -434,6 +447,14 @@ class FilterRenderer(
                 uCcmR1 = GLES20.glGetUniformLocation(p, "u_ccmR1"),
                 uCcmR2 = GLES20.glGetUniformLocation(p, "u_ccmR2"),
                 uCcmOffset = GLES20.glGetUniformLocation(p, "u_ccmOffset"),
+                uVignette = GLES20.glGetUniformLocation(p, "u_vignette"),
+                uGrain = GLES20.glGetUniformLocation(p, "u_grain"),
+                uSharpen = GLES20.glGetUniformLocation(p, "u_sharpen"),
+                uBlur = GLES20.glGetUniformLocation(p, "u_blur"),
+                uGlitch = GLES20.glGetUniformLocation(p, "u_glitch"),
+                uDuotone = GLES20.glGetUniformLocation(p, "u_duotone"),
+                uDuoShadow = GLES20.glGetUniformLocation(p, "u_duoShadow"),
+                uDuoHighlight = GLES20.glGetUniformLocation(p, "u_duoHighlight"),
                 // Cached once: glGetAttribLocation per draw was a driver query
                 // on every pass of every frame.
                 aPosition = GLES20.glGetAttribLocation(p, "aPosition"),
@@ -659,11 +680,19 @@ class FilterRenderer(
         }
         val lab = spec.lab
         if (prog.uCcmR0 != -1 && lab != null) {
-            val ccm = ccmUniformsCached(lab)
-            GLES20.glUniform3f(prog.uCcmR0, ccm[0], ccm[1], ccm[2])
-            GLES20.glUniform3f(prog.uCcmR1, ccm[3], ccm[4], ccm[5])
-            GLES20.glUniform3f(prog.uCcmR2, ccm[6], ccm[7], ccm[8])
-            GLES20.glUniform3f(prog.uCcmOffset, ccm[9], ccm[10], ccm[11])
+            val u = labUniformsCached(lab)
+            GLES20.glUniform3f(prog.uCcmR0, u.ccm[0], u.ccm[1], u.ccm[2])
+            GLES20.glUniform3f(prog.uCcmR1, u.ccm[3], u.ccm[4], u.ccm[5])
+            GLES20.glUniform3f(prog.uCcmR2, u.ccm[6], u.ccm[7], u.ccm[8])
+            GLES20.glUniform3f(prog.uCcmOffset, u.ccm[9], u.ccm[10], u.ccm[11])
+            GLES20.glUniform1f(prog.uVignette, u.vignette)
+            GLES20.glUniform1f(prog.uGrain, u.grain)
+            GLES20.glUniform1f(prog.uSharpen, u.sharpen)
+            GLES20.glUniform1f(prog.uBlur, u.blur)
+            GLES20.glUniform1f(prog.uGlitch, u.glitch)
+            GLES20.glUniform1f(prog.uDuotone, u.duotone)
+            GLES20.glUniform3f(prog.uDuoShadow, u.duotoneShadow[0], u.duotoneShadow[1], u.duotoneShadow[2])
+            GLES20.glUniform3f(prog.uDuoHighlight, u.duotoneHighlight[0], u.duotoneHighlight[1], u.duotoneHighlight[2])
         }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         if (inputIsOES) {
@@ -1290,20 +1319,20 @@ class FilterRenderer(
         }
 
         /**
-         * Same trick for the Filter Lab grade. The recipe is immutable, so an
-         * unchanged instance means unchanged uniforms and this is free. Editing a
-         * slider hands us a new instance and we recompute once.
+         * Same trick for the Filter Lab grade and effects. The recipe is
+         * immutable, so an unchanged instance means unchanged uniforms and this is
+         * free; editing any slider hands us a new instance and we recompute once.
          */
-        fun ccmUniformsCached(recipe: LabRecipe): FloatArray {
-            if (recipe === cachedRecipe) return cachedCcm
-            val out = LabGrading.uniformsFor(recipe.templateMatrix(), recipe.adjustments)
+        fun labUniformsCached(recipe: LabRecipe): LabUniforms {
+            if (recipe === cachedRecipe) return cachedLab
+            val out = LabUniforms.of(recipe)
             cachedRecipe = recipe
-            cachedCcm = out
+            cachedLab = out
             return out
         }
 
         @JvmStatic private var cachedRecipe: LabRecipe? = null
-        @JvmStatic private var cachedCcm: FloatArray = FloatArray(12)
+        @JvmStatic private var cachedLab: LabUniforms = LabUniforms.of(LabRecipe())
 
         @JvmStatic private var cachedPalette: IntArray? = null
         @JvmStatic private var cachedPaletteFloats: FloatArray = FloatArray(48)

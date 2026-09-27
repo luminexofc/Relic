@@ -44,7 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.retrocam.catalog.lab.LAB_EFFECTS
 import com.retrocam.catalog.lab.LabAdjustments
+import com.retrocam.catalog.lab.effectValue
 import com.retrocam.catalog.lab.LabTemplates
 import com.retrocam.catalog.lab.SavedRecipe
 import com.retrocam.ui.theme.RetroType
@@ -70,6 +72,8 @@ fun FilterLabPanel(
     onKnob: (Int, Float) -> Unit,
     onResetKnob: (Int) -> Unit,
     onResetAll: () -> Unit,
+    onEffect: (Int, Float) -> Unit,
+    onDuoColour: (Boolean, Int) -> Unit,
     onIntensity: (Float) -> Unit,
     onSave: () -> Unit,
     onEdit: (String) -> Unit,
@@ -144,6 +148,20 @@ fun FilterLabPanel(
                 TextButton(onClick = onResetAll) {
                     Text("RESET ALL", fontFamily = RetroType.Mono, fontSize = 11.sp, color = dim)
                 }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text("EFFECTS", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            LAB_EFFECTS.forEachIndexed { i, e ->
+                val v = recipe.effectValue(i)
+                LabSlider(
+                    e.label, v, e.min, e.max, accent, dim,
+                    { onEffect(i, it) },
+                    neutral = 0f,
+                    onReset = { onEffect(i, 0f) },
+                )
+            }
+            if (recipe.duotone > 0f) {
+                DuotoneColours(recipe, accent, dim, onDuoColour)
             }
         }
 
@@ -438,5 +456,63 @@ private fun TemplateChip(
             fontSize = 10.sp,
             color = if (selected) androidx.compose.ui.graphics.Color.Black else MaterialTheme.colorScheme.onBackground,
         )
+    }
+}
+
+
+/**
+ * Duotone shadow/highlight swatches. Not a full colour picker: two presets plus
+ * a hue slider would be a whole screen, and duotone only needs two anchors.
+ */
+@Composable
+private fun DuotoneColours(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onPick: (Boolean, Int) -> Unit,
+) {
+    val swatches = listOf(
+        0xFF141450.toInt(), 0xFF0F172A.toInt(), 0xFF1B4332.toInt(),
+        0xFF7F1D1D.toInt(), 0xFF000000.toInt(), 0xFFFFFFFF.toInt(),
+    )
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text("DUO SHADOW", fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim)
+        SwatchRow(swatches, recipe.duotoneShadow, accent, dim) { onPick(true, it) }
+        Text("DUO HIGHLIGHT", fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim)
+        SwatchRow(swatches, recipe.duotoneHighlight, accent, dim) { onPick(false, it) }
+    }
+}
+
+@Composable
+private fun SwatchRow(
+    swatches: List<Int>,
+    selected: Int,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onPick: (Int) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        swatches.forEach { c ->
+            val argb = c.toUInt().toLong().toInt()
+            val col = androidx.compose.ui.graphics.Color(
+                ((argb shr 16) and 0xFF) / 255f,
+                ((argb shr 8) and 0xFF) / 255f,
+                (argb and 0xFF) / 255f,
+            )
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .background(col, RoundedCornerShape(50))
+                    .border(
+                        if (selected == argb) 2.dp else 1.dp,
+                        if (selected == argb) accent else dim.copy(alpha = 0.4f),
+                        RoundedCornerShape(50),
+                    )
+                    .clickable { onPick(argb) },
+            )
+        }
     }
 }

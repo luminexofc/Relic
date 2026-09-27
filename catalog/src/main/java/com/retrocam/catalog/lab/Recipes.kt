@@ -35,7 +35,13 @@ data class SavedRecipe(
             id = id,
             displayName = name,
             family = FilterFamily.LAB,
-            context = "my filter lab recipe, ${lab.adjustments.describe()} over ${base.displayName}",
+            context = listOfNotNull(
+                "my filter lab recipe",
+                lab.templateId?.lowercase()?.replace('_', ' '),
+                lab.adjustments.describe().takeIf { it != "no grading" },
+                lab.activeEffects().takeIf { it.isNotEmpty() }?.joinToString(" "),
+                "over ${base.displayName}",
+            ).joinToString(", "),
             lab = lab,
         )
     }
@@ -50,8 +56,9 @@ data class SavedRecipe(
          */
         fun create(name: String, baseId: String, lab: LabRecipe): SavedRecipe {
             val clean = name.trim().uppercase().take(MAX_NAME).ifBlank { "UNTITLED" }
-            val id = contentId(clean, baseId, lab)
-            return SavedRecipe(id, clean, baseId, lab)
+            val clamped = LabRecipe.coerce(lab)
+            val id = contentId(clean, baseId, clamped)
+            return SavedRecipe(id, clean, baseId, clamped)
         }
 
         /**
@@ -68,7 +75,15 @@ data class SavedRecipe(
                 append(RecipeCodec.q(a.contrast)).append(',')
                 append(RecipeCodec.q(a.saturation)).append(',')
                 append(RecipeCodec.q(a.warmth)).append(',')
-                append(RecipeCodec.q(a.tint))
+                append(RecipeCodec.q(a.tint)).append('|')
+                append(RecipeCodec.q(lab.vignette)).append(',')
+                append(RecipeCodec.q(lab.grain)).append(',')
+                append(RecipeCodec.q(lab.sharpen)).append(',')
+                append(RecipeCodec.q(lab.blur)).append(',')
+                append(RecipeCodec.q(lab.glitch)).append(',')
+                append(RecipeCodec.q(lab.duotone)).append(',')
+                append(lab.duotoneShadow).append(',')
+                append(lab.duotoneHighlight)
             }
             return ID_PREFIX + fnv1a(canonical).toString(36)
         }
@@ -103,42 +118,55 @@ data class SavedRecipe(
  */
 object RecipeCodec {
 
-    const val VERSION = 1
+    /** Bumped when the field list changes. v2 added the six effect amounts and the duotone pair. */
+    const val VERSION = 2
 
     private const val SEP = ","
+    private const val FIELD_COUNT = 17
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
 
     fun encode(r: SavedRecipe): String {
-        val a = LabAdjustments.coerce(r.lab.adjustments)
+        val lab = LabRecipe.coerce(r.lab)
+        val a = lab.adjustments
         return listOf(
             VERSION.toString(),
             b64.encodeToString(r.name.uppercase().toByteArray()),
             r.baseId,
-            r.lab.templateId ?: "-",
+            lab.templateId ?: "-",
             q(a.brightness), q(a.contrast), q(a.saturation), q(a.warmth), q(a.tint),
+            q(lab.vignette), q(lab.grain), q(lab.sharpen), q(lab.blur), q(lab.glitch), q(lab.duotone),
+            r.lab.duotoneShadow.toString(), r.lab.duotoneHighlight.toString(),
         ).joinToString(SEP)
     }
 
     /** Returns null for anything malformed, so a bad scan can never crash the app. */
     fun decode(raw: String): SavedRecipe? {
         val parts = raw.trim().split(SEP)
-        if (parts.size != 9) return null
+        if (parts.size != FIELD_COUNT) return null
         if (parts[0] != VERSION.toString()) return null
         return try {
             val name = String(unb64.decode(parts[1])).uppercase()
             if (name.isBlank() || name.length > SavedRecipe.MAX_NAME) return null
-            val lab = LabRecipe(
-                templateId = parts[3].takeIf { it != "-" },
-                adjustments = LabAdjustments.coerce(
-                    LabAdjustments(
+            val lab = LabRecipe.coerce(
+                LabRecipe(
+                    templateId = parts[3].takeIf { it != "-" },
+                    adjustments = LabAdjustments(
                         brightness = parts[4].toFloat(),
                         contrast = parts[5].toFloat(),
                         saturation = parts[6].toFloat(),
                         warmth = parts[7].toFloat(),
                         tint = parts[8].toFloat(),
                     ),
+                    vignette = parts[9].toFloat(),
+                    grain = parts[10].toFloat(),
+                    sharpen = parts[11].toFloat(),
+                    blur = parts[12].toFloat(),
+                    glitch = parts[13].toFloat(),
+                    duotone = parts[14].toFloat(),
+                    duotoneShadow = parts[15].toInt(),
+                    duotoneHighlight = parts[16].toInt(),
                 ),
             )
             SavedRecipe(

@@ -53,6 +53,16 @@ object Shaders {
         uniform vec3 u_ccmR2;
         uniform vec3 u_ccmOffset;
 
+        // Filter Lab effect stages. All zero means off, so the branches are free.
+        uniform float u_vignette;
+        uniform float u_grain;
+        uniform float u_sharpen;
+        uniform float u_blur;
+        uniform float u_glitch;
+        uniform float u_duotone;
+        uniform vec3 u_duoShadow;
+        uniform vec3 u_duoHighlight;
+
         // All filter code works in FRAME space (0..1 across the destination, so
         // uv * u_resolution is real square pixels). sampleSrc maps any frame
         // coordinate back to the source texture through the combined matrix
@@ -850,23 +860,92 @@ object Shaders {
     """
 
     /**
-     * Filter Lab colour grade. Runs as a second chain stage after the base
-     * filter, so `src` is the base filter's output and this applies the recipe's
-     * matrix on top of it.
+     * Filter Lab: colour grade plus every effect stage, in one pass.
      *
-     * The matrix maths lives in LabGrading rather than here; see the note on
-     * why. The only thing left to do in the shader is clamp, because upstream's
-     * `ColorMatrixColorFilter` clamps implicitly by drawing into an 8-bit
-     * Bitmap and several FilterLibrary matrices (POLAROID_70S, CROSS_PROCESS,
-     * DRAMATIC) deliberately push channels past 0-255.
+     * Runs as the second chain link, so `src` is the base filter's output. Neighbour
+     * taps come from `sampleSrc` rather than `src`, which is what lets sharpen,
+     * blur and the RGB split live here instead of costing three more full-screen
+     * passes. The intermediate FBO is GL_CLAMP_TO_EDGE, so taps past the border
+     * replicate the edge pixel - the same thing upstream's convolution does by
+     * copying border pixels through untouched.
+     *
+     * Stage order matches `PhotoFilterBuilder.build()`: grade, duotone, sharpen,
+     * blur, then vignette and grain on top.
      */
     const val LAB_GRADE = """
         vec4 applyFilter(vec4 src, vec2 uv) {
-            vec3 c = vec3(
-                dot(u_ccmR0, src.rgb),
-                dot(u_ccmR1, src.rgb),
-                dot(u_ccmR2, src.rgb)
+            // One destination pixel in frame space, which is also the tap spacing
+            // for the convolutions and the channel split.
+            vec2 texel = 1.0 / max(u_resolution, vec2(1.0));
+
+            // --- sharpen: 3x3 [0,-1,0 / -1,5,-1 / 0,-1,0], mixed by amount ---
+            vec3 c = src.rgb;
+            if (u_sharpen > 0.0) {
+                vec3 sum = vec3(0.0);
+                sum += sampleSrc(uv + vec2(-texel.x, 0.0)).rgb * -1.0;
+                sum += sampleSrc(uv + vec2( texel.x, 0.0)).rgb * -1.0;
+                sum += sampleSrc(uv + vec2(0.0, -texel.y)).rgb * -1.0;
+                sum += sampleSrc(uv + vec2(0.0,  texel.y)).rgb * -1.0;
+                sum += c * 5.0;
+                c = mix(c, clamp(sum, 0.0, 1.0), u_sharpen);
+            }
+
+            // --- blur: 3x3 tent at widening spacing (see LabUniforms.BLUR_MAX_SPACING_PX) ---
+            if (u_blur > 0.0) {
+                vec2 s = texel * (1.0 + u_blur * 6.0);
+                vec3 sum = vec3(0.0);
+                sum += sampleSrc(uv + vec2(-s.x, -s.y)).rgb * 1.0;
+                sum += sampleSrc(uv + vec2( 0.0, -s.y)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2( s.x, -s.y)).rgb * 1.0;
+                sum += sampleSrc(uv + vec2(-s.x,  0.0)).rgb * 2.0;
+                sum += c * 4.0;
+                sum += sampleSrc(uv + vec2( s.x,  0.0)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2(-s.x,  s.y)).rgb * 1.0;
+                sum += sampleSrc(uv + vec2( 0.0,  s.y)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2( s.x,  s.y)).rgb * 1.0;
+                c = mix(c, sum / 16.0, u_blur);
+            }
+
+            // --- rgb split: red left, green centred, blue right ---
+            if (u_glitch > 0.0) {
+                vec2 g = vec2(max(1.0 / u_resolution.x, 0.0015) * u_glitch * 10.0, 0.0);
+                c.r = sampleSrc(uv - g).r;
+                c.b = sampleSrc(uv + g).b;
+            }
+
+            // --- grade: rows from LabGrading.toUniforms, offset pre-divided by 255 ---
+            vec3 graded = vec3(
+                dot(u_ccmR0, c),
+                dot(u_ccmR1, c),
+                dot(u_ccmR2, c)
             ) + u_ccmOffset;
+            c = clamp(graded, 0.0, 1.0);
+
+            // --- duotone: luminance ramp between the two chosen colours ---
+            if (u_duotone > 0.0) {
+                float l = luminance(c);
+                vec3 duo = mix(u_duoShadow, u_duoHighlight, l);
+                c = mix(c, duo, u_duotone);
+            }
+
+            // --- vignette: quadratic falloff, normalised so the corner is darkest ---
+            if (u_vignette > 0.0) {
+                float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+                vec2 d = uv - 0.5;
+                d.x *= aspect;
+                float nd = clamp(length(d) / length(vec2(0.5 * aspect, 0.5)), 0.0, 1.0);
+                c *= 1.0 - u_vignette * (nd * nd);
+            }
+
+            // --- grain ---
+            // Upstream seeds a fixed Random(42) per call, which is right for a
+            // still and wrong for a viewfinder: frozen noise reads as a dirty
+            // sensor, not film. Animated off u_time so it moves.
+            if (u_grain > 0.0) {
+                float n = hash12(floor(uv * u_resolution * 0.5) + floor(u_time * 24.0)) - 0.5;
+                c += n * u_grain * 0.47;
+            }
+
             return vec4(clamp(c, 0.0, 1.0), src.a);
         }
     """

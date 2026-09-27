@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.retrocam.camera.CameraController
 import com.retrocam.catalog.FilterCatalog
 import com.retrocam.catalog.FilterSpec
+import com.retrocam.catalog.lab.withEffect
 import com.retrocam.data.SettingsRepository
 import com.retrocam.renderer.FilterRenderer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -398,6 +399,36 @@ class CameraViewModel @Inject constructor(
                 else -> a
             }
             s.copy(labRecipe = s.labRecipe.copy(adjustments = next))
+        }
+    }
+
+    /** Updates one effect amount. [which] indexes [com.retrocam.catalog.lab.LAB_EFFECTS]. */
+    fun setLabEffect(which: Int, value: Float) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.withEffect(which, value)) }
+    }
+
+    /** [shadow] true for the shadow anchor, false for the highlight. Packed ARGB. */
+    fun setLabDuotoneColour(shadow: Boolean, argb: Int) {
+        _uiState.update {
+            it.copy(
+                labRecipe = if (shadow) {
+                    it.labRecipe.copy(duotoneShadow = argb)
+                } else {
+                    it.labRecipe.copy(duotoneHighlight = argb)
+                },
+            )
+        }
+    }
+
+    fun resetLabEffects() {
+        _uiState.update {
+            val r = it.labRecipe
+            it.copy(
+                labRecipe = r.copy(
+                    vignette = 0f, grain = 0f, sharpen = 0f,
+                    blur = 0f, glitch = 0f, duotone = 0f,
+                ),
+            )
         }
     }
 
