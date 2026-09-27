@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -735,6 +737,7 @@ private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, o
  * Order is the whole point of a chain, so every row shows its position and can
  * be moved rather than relying on insertion order to be obvious.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StageChain(
     recipe: com.retrocam.catalog.lab.LabRecipe,
@@ -894,7 +897,16 @@ private fun StageChain(
 
     Spacer(Modifier.height(6.dp))
     Text("ADD STAGE", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-    com.retrocam.catalog.lab.LabPrimitives.chainable.forEach { p ->
-        ImportChip(p.displayName, dim) { onAdd(p.id) }
+    // A wrapping grid, not a Column. There are 39 chainable primitives, and a
+    // Column gives each one its own full-width row, so the picker was a scroll
+    // away from everything else on the screen.
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        com.retrocam.catalog.lab.LabPrimitives.chainable.forEach { p ->
+            ImportChip(p.displayName, dim) { onAdd(p.id) }
+        }
     }
 }
