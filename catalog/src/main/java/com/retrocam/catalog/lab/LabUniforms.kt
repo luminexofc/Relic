@@ -7,8 +7,8 @@ package com.retrocam.catalog.lab
  * for the effect formulas; see LabGrading for the colour maths.
  *
  * Lives in :catalog rather than the renderer so the conversions (packed ARGB to
- * 0..1 floats, amount clamping, the grain scale factor) are unit-testable on a
- * desktop JVM. The renderer only uploads what this produces.
+ * 0..1 floats, amount clamping, the grain scale factor, the overlay rects) are
+ * unit-testable on a desktop JVM. The renderer only uploads what this produces.
  */
 data class LabUniforms(
     /** 12 floats: three matrix rows then the /255 offset. See [LabGrading.toUniforms]. */
@@ -25,8 +25,17 @@ data class LabUniforms(
     val duotone: Float,
     /** LUT blend, 0..1. Zero also means "no LUT bound". */
     val lutAmount: Float,
+    /** `[x0,y0,x1,y1]` in frame UV, or [NO_RECT] for no stamp. */
+    val stampRect: FloatArray,
+    val stampAlpha: Float,
+    /** `[x0,y0,x1,y1]` in frame UV, or [NO_RECT] for no watermark. */
+    val markRect: FloatArray,
+    val markAlpha: Float,
 ) {
     companion object {
+        /** A zero-width rect, which the shader treats as "nothing to draw". */
+        val NO_RECT = floatArrayOf(0f, 0f, 0f, 0f)
+
         /**
          * Upstream scales grain by 60 in 0-255 units, so full intensity moves a
          * channel by up to 60/255 = 0.235. Reproduced here in 0..1 space.
@@ -44,11 +53,20 @@ data class LabUniforms(
          * Upstream's stack blur is accumulator-based and cannot run inside one
          * fragment pass, so the GPU version is a 3x3 tent sampled at a spacing
          * that grows with the amount. Visually a soft blur, not a bit-exact port.
-         * The ceiling keeps the taps from smearing across the whole frame.
          */
         const val BLUR_MAX_SPACING_PX = 6f
 
-        fun of(recipe: LabRecipe): LabUniforms = LabUniforms(
+        /**
+         * @param stampAspect width/height of the rasterised stamp bitmap. Derived
+         *   from the text when not known, since a monospace face makes the
+         *   advance predictable.
+         * @param markAspect width/height of the watermark bitmap.
+         */
+        fun of(
+            recipe: LabRecipe,
+            stampAspect: Float = DateStamp.aspectFor(recipe.stampText.orEmpty()),
+            markAspect: Float = 1f,
+        ): LabUniforms = LabUniforms(
             ccm = LabGrading.uniformsFor(recipe.templateMatrix(), recipe.adjustments),
             vignette = recipe.vignette.coerceIn(0f, 1f),
             grain = recipe.grain.coerceIn(0f, 1f),
@@ -59,6 +77,18 @@ data class LabUniforms(
             duotoneHighlight = unpackRgb(recipe.duotoneHighlight),
             duotone = recipe.duotone.coerceIn(0f, 1f),
             lutAmount = if (recipe.lutActive) recipe.lutAmount.coerceIn(0f, 1f) else 0f,
+            stampRect = if (recipe.stampText.isNullOrBlank()) {
+                NO_RECT
+            } else {
+                OverlayPlacement.rect(recipe.stampPosition, stampAspect)
+            },
+            stampAlpha = recipe.stampAlpha.coerceIn(0f, 1f),
+            markRect = if (recipe.watermarkId == null) {
+                NO_RECT
+            } else {
+                OverlayPlacement.rect(recipe.watermarkPosition, markAspect, OverlayPlacement.MARK_PAD, OverlayPlacement.MARK_PAD)
+            },
+            markAlpha = recipe.watermarkAlpha.coerceIn(0f, 1f),
         )
     }
 }
@@ -115,3 +145,6 @@ fun LabRecipe.withEffect(i: Int, value: Float): LabRecipe {
         else -> this
     }
 }
+
+/** The five stamp positions, for the position picker. */
+val STAMP_POSITIONS = StampPosition.entries

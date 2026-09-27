@@ -33,7 +33,7 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "3",
+        version: String = "4",
         name: String = "X",
         base: String = "original",
         template: String = "-",
@@ -41,7 +41,9 @@ class RecipeCodecTest {
         effects: List<String> = List(6) { "0" },
         colours: List<String> = listOf("0", "255"),
         lut: List<String> = listOf("-", "0"),
-    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut)
+        stamp: List<String> = listOf("-", "0", "4", "1", "-", "0", "4"),
+        reserved: String = "0",
+    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut + stamp + reserved)
         .joinToString(",")
 
     @Test
@@ -56,7 +58,7 @@ class RecipeCodecTest {
         // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(19, enc.split(',').size, "bad field count in '$enc'")
+        assertEquals(27, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
     }
 
@@ -72,6 +74,40 @@ class RecipeCodecTest {
             ),
         )
         assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `overlays survive a round trip`() {
+        val r = SavedRecipe.create(
+            "STAMPED", "original",
+            LabRecipe(
+                stampText = "'98 08 13", stampColor = 0xFFFF8C14.toInt(),
+                stampPosition = StampPosition.CENTER, stampAlpha = 0.7f,
+                watermarkId = "mark_abc", watermarkAlpha = 0.5f,
+                watermarkPosition = StampPosition.TOP_LEFT,
+            ),
+        )
+        assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `a stamp containing a comma survives`() {
+        // The stamp text is free text, so it must be encoded like the name is.
+        val r = SavedRecipe.create("S", "original", LabRecipe(stampText = "a,b,c"))
+        assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
+    }
+
+    @Test
+    fun `an out of range stamp position falls back instead of throwing`() {
+        val wild = payload(stamp = listOf("-", "0", "99", "1", "-", "0", "99"))
+        val back = assertNotNull(RecipeCodec.decode(wild))
+        assertEquals(StampPosition.BOTTOM_RIGHT, back.lab.stampPosition)
+    }
+
+    @Test
+    fun `overlay amounts are clamped on decode`() {
+        val wild = payload(stamp = listOf("-", "0", "0", "99", "-", "0", "0"))
+        assertEquals(1f, assertNotNull(RecipeCodec.decode(wild)).lab.stampAlpha)
     }
 
     @Test

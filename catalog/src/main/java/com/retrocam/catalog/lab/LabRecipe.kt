@@ -43,6 +43,25 @@ data class LabRecipe(
     val lutId: String? = null,
     /** Blend toward the LUT, 0..1. */
     val lutAmount: Float = 0f,
+    // ---- overlays ----
+    /**
+     * Date stamp text, or null for no stamp. The text is rasterised on the CPU
+     * (only Canvas can lay out glyphs) and composited live by the shader.
+     */
+    val stampText: String? = null,
+    val stampColor: Int = DateStamp.DEFAULT_COLOR,
+    val stampPosition: StampPosition = StampPosition.BOTTOM_RIGHT,
+    val stampAlpha: Float = 1f,
+    /** Content hash of an imported watermark logo, or null. */
+    val watermarkId: String? = null,
+    val watermarkAlpha: Float = 0.8f,
+    val watermarkPosition: StampPosition = StampPosition.BOTTOM_RIGHT,
+    /**
+     * Payload slot for the next version. Present so appending a field later does
+     * not silently reinterpret every recipe already in the wild; it is always
+     * written as "0" and never read.
+     */
+    val _reserved: String = "0",
 ) {
     /** The template's 4x5 matrix, or null when there is no template. */
     fun templateMatrix(): FloatArray? = templateId?.let { LabTemplates.byId[it]?.matrix }
@@ -65,6 +84,8 @@ data class LabRecipe(
         if (glitch > 0f) add("glitch")
         if (duotone > 0f) add("duotone")
         if (lutId != null && lutAmount > 0f) add("lut")
+        if (!stampText.isNullOrBlank()) add("date stamp")
+        if (watermarkId != null) add("watermark")
     }
 
     /** True when a LUT is selected and switched on. */
@@ -96,6 +117,14 @@ data class LabRecipe(
             duotoneHighlight = r.duotoneHighlight,
             lutId = r.lutId,
             lutAmount = r.lutAmount.coerceIn(0f, 1f),
+            stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
+            stampColor = r.stampColor,
+            stampPosition = r.stampPosition,
+            stampAlpha = r.stampAlpha.coerceIn(0f, 1f),
+            watermarkId = r.watermarkId?.takeIf { it.isNotBlank() },
+            watermarkAlpha = r.watermarkAlpha.coerceIn(0f, 1f),
+            watermarkPosition = r.watermarkPosition,
+            _reserved = "0",
         )
     }
 }

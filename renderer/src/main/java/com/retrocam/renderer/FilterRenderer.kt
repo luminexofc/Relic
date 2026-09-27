@@ -72,6 +72,12 @@ class FilterRenderer(
         val uLutAmount: Int,
         val uLutCube: Int,
         val uLutGrid: Int,
+        val uStampTex: Int,
+        val uStampRect: Int,
+        val uStampAlpha: Int,
+        val uMarkTex: Int,
+        val uMarkRect: Int,
+        val uMarkAlpha: Int,
         val aPosition: Int,
         val aTexCoord: Int,
     )
@@ -85,6 +91,10 @@ class FilterRenderer(
     )
 
     private data class ThumbnailRequest(val spec: FilterSpec, val sizePx: Int, val callback: (Bitmap) -> Unit)
+
+    private data class PaletteRequest(val sizePx: Int, val callback: (IntArray) -> Unit)
+
+    private val paletteQueue = java.util.concurrent.ConcurrentLinkedQueue<PaletteRequest>()
 
     private sealed interface VideoOp {
         class Start(
@@ -290,6 +300,18 @@ class FilterRenderer(
         synchronized(captureQueue) { captureQueue.addLast(CaptureRequest(width, height, links, callback)) }
     }
 
+    /**
+     * Grabs a tiny snapshot of the current spec for CPU-side colour analysis.
+     *
+     * A readback has to be CPU work by definition, and doing it on the live frame
+     * would stall the GL thread, so this renders a small offscreen copy at the
+     * current spec instead. Deliberately tiny: the caller only wants a rough
+     * palette, and 32x32 is 4KB.
+     */
+    fun queuePaletteProbe(callback: (IntArray) -> Unit) {
+        paletteQueue.add(PaletteRequest(32, callback))
+    }
+
     fun queueThumbnail(spec: FilterSpec, sizePx: Int, callback: (Bitmap) -> Unit) {
         synchronized(thumbnailQueue) { thumbnailQueue.addLast(ThumbnailRequest(spec, sizePx, callback)) }
     }
@@ -376,6 +398,7 @@ class FilterRenderer(
         }
         if (isRecording) renderVideoFrame()
         drainThumbnails()
+        drainPaletteProbes()
         drainCaptures()
         frameMs = frameMs * 0.9f + (SystemClock.elapsedRealtimeNanos() - frameStart) / 1_000_000f * 0.1f
     }
@@ -426,8 +449,25 @@ class FilterRenderer(
 
     fun hasLut(id: String): Boolean = labLuts.containsKey(id)
 
+    /**
+     * Overlay textures (date stamp, watermark logos), keyed by [stampKey] or by
+     * the logo's content hash. Same GL lifetime rules as everything else here.
+     */
+    private val overlayTexs = LinkedHashMap<String, Int>()
+    private val overlayAspects = HashMap<String, Float>()
+
+    /** Key for a rasterised stamp: same text and colour is the same bitmap. */
+    private fun stampKey(recipe: com.retrocam.catalog.lab.LabRecipe): String? {
+        val t = recipe.stampText ?: return null
+        if (t.isBlank()) return null
+        return "stamp:" + com.retrocam.catalog.lab.DateStamp.hashStampText(t, recipe.stampColor)
+    }
+
     private sealed interface LabOp {
         data class Upload(val id: String, val pixels: IntArray, val side: Int, val cube: Int) : LabOp
+        data class Overlay(
+            val id: String, val pixels: IntArray, val w: Int, val h: Int, val aspect: Float,
+        ) : LabOp
     }
 
     private val labQueue = java.util.concurrent.ConcurrentLinkedQueue<LabOp>()
@@ -437,12 +477,59 @@ class FilterRenderer(
         labQueue.add(LabOp.Upload(id, pixels, side, cube))
     }
 
+    /**
+     * Queues an overlay upload. [aspect] must be the rasterised bitmap's real
+     * width/height: the placement maths needs it and a mismatch would stretch
+     * the stamp.
+     */
+    fun queueOverlayUpload(id: String, pixels: IntArray, w: Int, h: Int, aspect: Float) {
+        labQueue.add(LabOp.Overlay(id, pixels, w, h, aspect))
+    }
+
+    private fun uploadOverlay(id: String, pixels: IntArray, w: Int, h: Int, aspect: Float) {
+        overlayTexs[id]?.let { GLES20.glDeleteTextures(1, intArrayOf(it), 0) }
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+        val buf = java.nio.ByteBuffer
+            .allocateDirect(w * h * 4)
+            .order(java.nio.ByteOrder.nativeOrder())
+        for (p in pixels) {
+            buf.put(((p shr 16) and 0xFF).toByte())
+            buf.put(((p shr 8) and 0xFF).toByte())
+            buf.put((p and 0xFF).toByte())
+            buf.put(((p ushr 24) and 0xFF).toByte())
+        }
+        buf.position(0)
+        GLES20.glTexImage2D(
+            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf,
+        )
+        // The stamp is a small raster scaled up, so LINEAR keeps it from looking
+        // like a mosaic; the watermark is usually shown near native size.
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        overlayTexs[id] = tex[0]
+        overlayAspects[id] = aspect
+    }
+
     private fun drainLabOps() {
         while (true) {
             when (val op = labQueue.poll() ?: return) {
                 is LabOp.Upload -> uploadLut(op.id, op.pixels, op.side, op.cube)
+                is LabOp.Overlay -> uploadOverlay(op.id, op.pixels, op.w, op.h, op.aspect)
             }
         }
+    }
+
+    /** Drops every overlay texture. Part of context-loss and release handling. */
+    private fun clearOverlays() {
+        if (overlayTexs.isEmpty()) return
+        GLES20.glDeleteTextures(overlayTexs.size, overlayTexs.values.toIntArray(), 0)
+        overlayTexs.clear()
+        overlayAspects.clear()
     }
 
     fun release() {
@@ -481,6 +568,7 @@ class FilterRenderer(
             labLuts.clear()
             lutCubes.clear()
         }
+        clearOverlays()
     }
 
     // ---- internals (GL thread only) ----
@@ -542,6 +630,12 @@ class FilterRenderer(
                 uLutAmount = GLES20.glGetUniformLocation(p, "u_lutAmount"),
                 uLutCube = GLES20.glGetUniformLocation(p, "u_lutCube"),
                 uLutGrid = GLES20.glGetUniformLocation(p, "u_lutGrid"),
+                uStampTex = GLES20.glGetUniformLocation(p, "u_stampTex"),
+                uStampRect = GLES20.glGetUniformLocation(p, "u_stampRect"),
+                uStampAlpha = GLES20.glGetUniformLocation(p, "u_stampAlpha"),
+                uMarkTex = GLES20.glGetUniformLocation(p, "u_markTex"),
+                uMarkRect = GLES20.glGetUniformLocation(p, "u_markRect"),
+                uMarkAlpha = GLES20.glGetUniformLocation(p, "u_markAlpha"),
                 // Cached once: glGetAttribLocation per draw was a driver query
                 // on every pass of every frame.
                 aPosition = GLES20.glGetAttribLocation(p, "aPosition"),
@@ -795,6 +889,28 @@ class FilterRenderer(
             } else if (prog.uLutAmount != -1) {
                 GLES20.glUniform1f(prog.uLutAmount, 0f)
             }
+            // Overlays. The stamp is keyed by its text+colour because that is
+            // what the CPU rasterises; the watermark by its content hash.
+            val stampTex = stampKey(lab)?.let { overlayTexs[it] }
+            if (stampTex != null && prog.uStampRect != -1) {
+                GLES20.glUniform4f(prog.uStampRect, u.stampRect[0], u.stampRect[1], u.stampRect[2], u.stampRect[3])
+                GLES20.glUniform1f(prog.uStampAlpha, u.stampAlpha)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE5)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, stampTex)
+                GLES20.glUniform1i(prog.uStampTex, 5)
+            } else if (prog.uStampRect != -1) {
+                GLES20.glUniform4f(prog.uStampRect, 0f, 0f, 0f, 0f)
+            }
+            val markTex = lab.watermarkId?.let { overlayTexs[it] }
+            if (markTex != null && prog.uMarkRect != -1) {
+                GLES20.glUniform4f(prog.uMarkRect, u.markRect[0], u.markRect[1], u.markRect[2], u.markRect[3])
+                GLES20.glUniform1f(prog.uMarkAlpha, u.markAlpha)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE6)
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, markTex)
+                GLES20.glUniform1i(prog.uMarkTex, 6)
+            } else if (prog.uMarkRect != -1) {
+                GLES20.glUniform4f(prog.uMarkRect, 0f, 0f, 0f, 0f)
+            }
         }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         if (inputIsOES) {
@@ -982,6 +1098,19 @@ class FilterRenderer(
         screenRead = null
         runCatching { pendingPfd?.close() }
         pendingPfd = null
+    }
+
+    private fun drainPaletteProbes() {
+        while (true) {
+            // ConcurrentLinkedQueue, so poll() rather than pollFirst().
+            val req = paletteQueue.poll() ?: return
+            val spec = currentSpec
+            if (spec == null) continue
+            val n = req.sizePx
+            val px = IntArray(n * n)
+            renderThumbnail(spec, n)?.getPixels(px, 0, n, 0, 0, n, n)
+            mainHandler.post { req.callback(px) }
+        }
     }
 
     private fun drainThumbnails() {

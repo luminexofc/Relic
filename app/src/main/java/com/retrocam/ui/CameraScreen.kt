@@ -210,6 +210,11 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importLut(uri, renderer)
     }
+    val markPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) viewModel.importWatermark(uri)
+    }
+    val palette by viewModel.palette.collectAsStateWithLifecycle()
+    val watermarks by viewModel.watermarks.collectAsStateWithLifecycle()
     var galleryThumb by remember { mutableStateOf<Bitmap?>(null) }
     var orientBucket by remember { mutableStateOf(0) }
     var orientAngle by remember { mutableFloatStateOf(0f) }
@@ -589,6 +594,18 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 },
                 onImportLut = { lutPicker.launch("image/*") },
                 onLutAmount = viewModel::setLabLutAmount,
+                palette = palette,
+                watermarks = watermarks,
+                onToggleStamp = viewModel::toggleLabStamp,
+                onStampText = viewModel::setLabStampText,
+                onStampColour = viewModel::setLabStampColour,
+                onStampPosition = viewModel::setLabStampPosition,
+                onStampAlpha = viewModel::setLabStampAlpha,
+                onPickWatermark = viewModel::setLabWatermark,
+                onImportWatermark = { markPicker.launch("image/*") },
+                onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
+                onExtractPalette = viewModel::extractPalette,
+                onApplyPaletteColour = viewModel::applyPaletteColour,
                 onIntensity = viewModel::setLabIntensity,
                 onSave = viewModel::saveLab,
                 onEdit = viewModel::editLabRecipe,

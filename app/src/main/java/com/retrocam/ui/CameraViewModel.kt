@@ -13,7 +13,9 @@ import androidx.lifecycle.viewModelScope
 import com.retrocam.camera.CameraController
 import com.retrocam.catalog.FilterCatalog
 import com.retrocam.catalog.FilterSpec
+import com.retrocam.catalog.lab.DateStamp
 import com.retrocam.catalog.lab.withEffect
+import com.uvstudio.him.photofilterlibrary.FilterEngine
 import com.retrocam.data.SettingsRepository
 import com.retrocam.renderer.FilterRenderer
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,7 +27,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
@@ -123,6 +124,141 @@ class CameraViewModel @Inject constructor(
      * before the [init] block that used to assign it.
      */
     private val lutStore: LutStore by lazy { LutStore(context) }
+
+    /** The CPU half of the overlay path; see [OverlayRaster] for why it exists. */
+    private val overlayRaster: OverlayRaster by lazy { OverlayRaster(context) }
+
+    /** Dominant colours read back from the live frame, newest last. */
+    private val _palette = MutableStateFlow<List<Int>>(emptyList())
+    val palette: StateFlow<List<Int>> = _palette.asStateFlow()
+
+    /** Watermark logos the user has imported. */
+    private val _watermarks = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+    val watermarks: StateFlow<List<Pair<String, String>>> = _watermarks.asStateFlow()
+
+    fun refreshOverlays() {
+        _watermarks.value = overlayRaster.watermarks()
+    }
+
+    // ---- overlays ----
+
+    fun setLabStampText(text: String) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(stampText = text.take(24))) }
+    }
+
+    fun toggleLabStamp() {
+        _uiState.update { s ->
+            val on = !s.labRecipe.stampText.isNullOrBlank()
+            s.copy(
+                labRecipe = s.labRecipe.copy(
+                    stampText = if (on) null else DateStamp.defaultText(java.util.Calendar.getInstance()),
+                ),
+            )
+        }
+        syncStamp()
+    }
+
+    fun setLabStampColour(argb: Int) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(stampColor = argb)) }
+        syncStamp()
+    }
+
+    fun setLabStampPosition(index: Int) {
+        val pos = com.retrocam.catalog.lab.STAMP_POSITIONS.getOrNull(index) ?: return
+        setLabStampPosition(pos)
+    }
+
+    fun setLabStampPosition(pos: com.retrocam.catalog.lab.StampPosition) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(stampPosition = pos)) }
+    }
+
+    fun setLabStampAlpha(v: Float) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(stampAlpha = v.coerceIn(0f, 1f))) }
+    }
+
+    fun setLabWatermark(id: String?) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(watermarkId = id)) }
+        id?.let { uploadWatermark(it) }
+    }
+
+    fun setLabWatermarkAlpha(v: Float) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(watermarkAlpha = v.coerceIn(0f, 1f))) }
+    }
+
+    fun setLabWatermarkPosition(pos: com.retrocam.catalog.lab.StampPosition) {
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(watermarkPosition = pos)) }
+    }
+
+    fun importWatermark(uri: android.net.Uri) {
+        val r = overlayRaster.importWatermark(uri)
+        val entry = r.getOrNull()
+        if (entry == null) {
+            Feedback.error(context)
+            return
+        }
+        refreshOverlays()
+        setLabWatermark(entry.first)
+    }
+
+    /** Rasterises the current stamp text and queues it for the GL thread. */
+    private fun syncStamp() {
+        val r = _uiState.value.labRecipe
+        val text = r.stampText
+        if (text.isNullOrBlank()) return
+        val raster = overlayRaster.stamp(text, r.stampColor) ?: return
+        glRenderer?.queueOverlayUpload(stampTextureId(text, r.stampColor), raster.pixels, raster.width, raster.height, raster.aspect)
+    }
+
+    private fun stampTextureId(text: String, color: Int) =
+        "stamp:" + DateStamp.hashStampText(text, color)
+
+    private fun uploadWatermark(id: String) {
+        val raster = overlayRaster.watermark(id) ?: return
+        glRenderer?.queueOverlayUpload(id, raster.pixels, raster.width, raster.height, raster.aspect)
+    }
+
+    /**
+     * Re-uploads whatever overlays the current draft needs. Called from
+     * [syncRenderer] because a fresh GL context has no textures at all.
+     */
+    fun syncOverlays() {
+        val r = _uiState.value.labRecipe
+        if (!r.stampText.isNullOrBlank()) syncStamp()
+        r.watermarkId?.let { uploadWatermark(it) }
+    }
+
+    /**
+     * Grabs a small snapshot of the current frame and extracts its dominant
+     * colours.
+     *
+     * A CPU readback by definition: the GPU cannot hand back pixels mid-frame
+     * without stalling, so this renders a tiny offscreen copy and samples that.
+     * The result is offered as duotone anchors, which is the use that actually
+     * pays off in a filter app.
+     */
+    fun extractPalette() {
+        val renderer = glRenderer ?: return
+        renderer.queuePaletteProbe { argb ->
+            viewModelScope.launch {
+                val bmp = android.graphics.Bitmap.createBitmap(32, 32, android.graphics.Bitmap.Config.ARGB_8888)
+                bmp.setPixels(argb, 0, 32, 0, 0, 32, 32)
+                val colors = try {
+                    FilterEngine.extractPalette(bmp, 5)
+                } catch (t: Throwable) {
+                    emptyList()
+                } finally {
+                    bmp.recycle()
+                }
+                _palette.value = colors
+            }
+        }
+    }
+
+    /** Applies a palette colour to a duotone anchor. */
+    fun applyPaletteColour(argb: Int, shadow: Boolean) {
+        setLabDuotoneColour(shadow, argb)
+        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(duotone = 1f)) }
+    }
 
     init {
         Feedback.ensureSoundLoaded()
@@ -346,6 +482,7 @@ class CameraViewModel @Inject constructor(
      */
     fun openLab() {
         val s = _uiState.value
+        refreshOverlays()
         val editing = s.labRecipes.firstOrNull { it.id == s.filter.id }
         _uiState.update {
             if (editing != null) {
@@ -672,6 +809,8 @@ class CameraViewModel @Inject constructor(
         // a context loss would silently drop the LUT from every recipe.
         val lutId = _uiState.value.labRecipe.lutId ?: _uiState.value.filter.lab?.lutId
         if (lutId != null) uploadLut(lutId, renderer)
+        syncOverlays()
+        refreshOverlays()
         // Selfie mirror only when the user wants it; back camera never mirrors.
         renderer.mirror = _uiState.value.frontCamera && _uiState.value.mirrorFront
         renderer.bufWidth = controller.bufferWidth

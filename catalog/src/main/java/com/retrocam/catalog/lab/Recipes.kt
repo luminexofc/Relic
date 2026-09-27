@@ -86,7 +86,14 @@ data class SavedRecipe(
                 append(lab.duotoneShadow).append(',')
                 append(lab.duotoneHighlight).append('|')
                 append(lab.lutId ?: "-").append(',')
-                append(RecipeCodec.q(lab.lutAmount))
+                append(RecipeCodec.q(lab.lutAmount)).append('|')
+                append(lab.stampText ?: "-").append('|')
+                append(lab.stampColor).append('|')
+                append(lab.stampPosition.ordinal).append('|')
+                append(RecipeCodec.q(lab.stampAlpha)).append('|')
+                append(lab.watermarkId ?: "-").append('|')
+                append(RecipeCodec.q(lab.watermarkAlpha)).append('|')
+                append(lab.watermarkPosition.ordinal)
             }
             return ID_PREFIX + fnv1a(canonical).toString(36)
         }
@@ -121,11 +128,11 @@ data class SavedRecipe(
  */
 object RecipeCodec {
 
-    /** Bumped when the field list changes. v2 added effects, v3 added the LUT pair. */
-    const val VERSION = 3
+    /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
+    const val VERSION = 4
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 19
+    private const val FIELD_COUNT = 27
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -142,6 +149,16 @@ object RecipeCodec {
             q(lab.vignette), q(lab.grain), q(lab.sharpen), q(lab.blur), q(lab.glitch), q(lab.duotone),
             r.lab.duotoneShadow.toString(), r.lab.duotoneHighlight.toString(),
             r.lab.lutId ?: "-", q(lab.lutAmount),
+            r.lab.stampText?.let { b64.encodeToString(it.toByteArray()) } ?: "-",
+            r.lab.stampColor.toString(),
+            r.lab.stampPosition.ordinal.toString(),
+            q(lab.stampAlpha),
+            r.lab.watermarkId ?: "-",
+            q(lab.watermarkAlpha),
+            r.lab.watermarkPosition.ordinal.toString(),
+            // Reserved slot, so the next version can append a field without
+            // reinterpreting every payload already out there.
+            "0",
         ).joinToString(SEP)
     }
 
@@ -173,6 +190,22 @@ object RecipeCodec {
                     duotoneHighlight = parts[16].toInt(),
                     lutId = parts[17].takeIf { it != "-" },
                     lutAmount = parts[18].toFloat(),
+                    // Free text again, so it gets the same base64 treatment as the
+                    // recipe name rather than being trusted to avoid separators.
+                    stampText = parts[19].takeIf { it != "-" }?.let { String(unb64.decode(it)) },
+                    stampColor = parts[20].toInt(),
+                    stampPosition = StampPosition.entries.getOrElse(parts[21].toInt()) {
+                        StampPosition.BOTTOM_RIGHT
+                    },
+                    stampAlpha = parts[22].toFloat(),
+                    watermarkId = parts[23].takeIf { it != "-" },
+                    watermarkAlpha = parts[24].toFloat(),
+                    watermarkPosition = StampPosition.entries.getOrElse(parts[25].toInt()) {
+                        StampPosition.BOTTOM_RIGHT
+                    },
+                    // Unused today, reserved so a future field can be appended
+                    // without reinterpreting every existing payload.
+                    _reserved = parts[26],
                 ),
             )
             SavedRecipe(

@@ -69,6 +69,16 @@ object Shaders {
         uniform float u_lutCube;   // 16 or 64
         uniform float u_lutGrid;   // sqrt(cube): 4 or 8
 
+        // Filter Lab overlays: the 1990s date stamp and a watermark logo. Each is
+        // a pre-rasterised bitmap; the rect comes from OverlayPlacement.rect().
+        // A zero-width rect means "no overlay".
+        uniform sampler2D u_stampTex;
+        uniform vec4 u_stampRect;
+        uniform float u_stampAlpha;
+        uniform sampler2D u_markTex;
+        uniform vec4 u_markRect;
+        uniform float u_markAlpha;
+
         // All filter code works in FRAME space (0..1 across the destination, so
         // uv * u_resolution is real square pixels). sampleSrc maps any frame
         // coordinate back to the source texture through the combined matrix
@@ -968,6 +978,31 @@ object Shaders {
             if (u_grain > 0.0) {
                 float n = hash12(floor(uv * u_resolution * 0.5) + floor(u_time * 24.0)) - 0.5;
                 c += n * u_grain * 0.47;
+            }
+
+            // --- watermark, then date stamp (upstream's order) ---
+            // The v flip is not arbitrary: frame y grows upward (quadPos pairs
+            // clip y=-1 with texcoord y=0) while a decoded Bitmap has row 0 at the
+            // top, so v must run the other way inside the rect.
+            if (u_markRect.z > u_markRect.x) {
+                vec2 t = vec2(
+                    (uv.x - u_markRect.x) / (u_markRect.z - u_markRect.x),
+                    (u_markRect.w - uv.y) / (u_markRect.w - u_markRect.y)
+                );
+                if (t.x >= 0.0 && t.x <= 1.0 && t.y >= 0.0 && t.y <= 1.0) {
+                    vec4 m = texture2D(u_markTex, t);
+                    c = mix(c, m.rgb, m.a * u_markAlpha);
+                }
+            }
+            if (u_stampRect.z > u_stampRect.x) {
+                vec2 t = vec2(
+                    (uv.x - u_stampRect.x) / (u_stampRect.z - u_stampRect.x),
+                    (u_stampRect.w - uv.y) / (u_stampRect.w - u_stampRect.y)
+                );
+                if (t.x >= 0.0 && t.x <= 1.0 && t.y >= 0.0 && t.y <= 1.0) {
+                    vec4 m = texture2D(u_stampTex, t);
+                    c = mix(c, m.rgb, m.a * u_stampAlpha);
+                }
             }
 
             return vec4(clamp(c, 0.0, 1.0), src.a);

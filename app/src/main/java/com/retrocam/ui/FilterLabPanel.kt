@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.retrocam.catalog.lab.LAB_EFFECTS
 import com.retrocam.catalog.lab.LabAdjustments
+import com.retrocam.catalog.lab.STAMP_POSITIONS
 import com.retrocam.catalog.lab.effectValue
 import com.retrocam.catalog.lab.LabTemplates
 import com.retrocam.catalog.lab.SavedRecipe
@@ -78,6 +79,18 @@ fun FilterLabPanel(
     onPickLut: (String) -> Unit,
     onImportLut: () -> Unit,
     onLutAmount: (Float) -> Unit,
+    palette: List<Int>,
+    watermarks: List<Pair<String, String>>,
+    onToggleStamp: () -> Unit,
+    onStampText: (String) -> Unit,
+    onStampColour: (Int) -> Unit,
+    onStampPosition: (Int) -> Unit,
+    onStampAlpha: (Float) -> Unit,
+    onPickWatermark: (String?) -> Unit,
+    onImportWatermark: () -> Unit,
+    onWatermarkAlpha: (Float) -> Unit,
+    onExtractPalette: () -> Unit,
+    onApplyPaletteColour: (Int, Boolean) -> Unit,
     onIntensity: (Float) -> Unit,
     onSave: () -> Unit,
     onEdit: (String) -> Unit,
@@ -186,16 +199,69 @@ fun FilterLabPanel(
                         dim,
                     ) { onPickLut(e.id) }
                 }
+                item { ImportChip("+ IMPORT LUT", dim, onImportLut) }
+            }
+            Spacer(Modifier.height(10.dp))
+            LabSectionToggle("1990s DATE STAMP", !recipe.stampText.isNullOrBlank(), accent, dim, onToggleStamp)
+            val stampText = recipe.stampText
+            if (!stampText.isNullOrBlank()) {
+                TextField(
+                    value = stampText,
+                    onValueChange = onStampText,
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(
+                        fontFamily = RetroType.Mono,
+                        fontSize = 13.sp,
+                    ),
+                    shape = RoundedCornerShape(50),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surface,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                        focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                        unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                )
+                SwatchRow(
+                    listOf(0xFFFF8C14.toInt(), 0xFFFF3B30.toInt(), 0xFF34C759.toInt(), 0xFF00C7BE.toInt(), 0xFFFFFFFF.toInt()),
+                    recipe.stampColor, accent, dim,
+                ) { onStampColour(it) }
+                PositionRow(recipe.stampPosition.ordinal, accent, dim) { onStampPosition(it) }
+                LabSlider("STAMP OPACITY", recipe.stampAlpha, 0f, 1f, accent, dim, onStampAlpha)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("WATERMARK", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
-                    Box(
-                        Modifier
-                            .border(1.dp, dim.copy(alpha = 0.5f), RoundedCornerShape(50))
-                            .clickable(onClick = onImportLut)
-                            .padding(horizontal = 12.dp, vertical = 7.dp),
-                    ) {
-                        Text("+ IMPORT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
-                    }
+                    TemplateChip("NONE", recipe.watermarkId == null, accent, dim) { onPickWatermark(null) }
                 }
+                items(watermarks, key = { it.first }) { (id, label) ->
+                    TemplateChip(label, recipe.watermarkId == id, accent, dim) { onPickWatermark(id) }
+                }
+                item { ImportChip("+ IMPORT", dim, onImportWatermark) }
+            }
+            if (recipe.watermarkId != null) {
+                LabSlider("MARK OPACITY", recipe.watermarkAlpha, 0f, 1f, accent, dim, onWatermarkAlpha)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("PALETTE FROM FRAME", fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onExtractPalette) {
+                    Text("EXTRACT", fontFamily = RetroType.Mono, fontSize = 10.sp, color = accent)
+                }
+                if (palette.isNotEmpty()) {
+                    SwatchRow(palette, -1, accent, dim) { onApplyPaletteColour(it, true) }
+                }
+            }
+            if (palette.isNotEmpty()) {
+                Text(
+                    "tap a swatch to use it as the duotone shadow",
+                    fontFamily = RetroType.Mono, fontSize = 9.sp, color = dim,
+                )
             }
         }
 
@@ -547,6 +613,57 @@ private fun SwatchRow(
                     )
                     .clickable { onPick(argb) },
             )
+        }
+    }
+}
+
+
+@Composable
+private fun LabSectionToggle(
+    label: String,
+    on: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onToggle: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, fontFamily = RetroType.Mono, fontSize = 10.sp, color = if (on) accent else dim)
+        Text(if (on) "ON" else "OFF", fontFamily = RetroType.Mono, fontSize = 10.sp, color = if (on) accent else dim)
+    }
+}
+
+@Composable
+private fun ImportChip(label: String, dim: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .border(1.dp, dim.copy(alpha = 0.5f), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(label, fontFamily = RetroType.Mono, fontSize = 10.sp, color = dim)
+    }
+}
+
+@Composable
+private fun PositionRow(
+    selected: Int,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onPick: (Int) -> Unit,
+) {
+    LazyRow(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        items(STAMP_POSITIONS.size) { i ->
+            TemplateChip(STAMP_POSITIONS[i].label, selected == i, accent, dim) { onPick(i) }
         }
     }
 }
