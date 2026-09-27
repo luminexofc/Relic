@@ -1,0 +1,23 @@
+# Build output
+build/
+.gradle/
+.kotlin/
+captures/
+.cxx/
+
+# Machine-specific: points at this device's Android SDK
+local.properties
+
+# Signing material — never commit
+*.keystore
+*.jks
+keystore.properties
+
+# Built APKs
+*.apk
+*.aab
+
+# IDE
+.idea/
+*.iml
+.DS_Store
