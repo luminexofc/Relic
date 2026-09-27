@@ -1,6 +1,6 @@
 package com.retrocam.catalog
 
-enum class FilterFamily { DITHER, PRINT, HARDWARE, STYLIZE, DISTORT }
+enum class FilterFamily { DITHER, PRINT, HARDWARE, STYLIZE, DISTORT, LAB }
 
 /**
  * A filter is pure data: GLSL + tuning. Adding a filter = one body string +
@@ -30,6 +30,12 @@ data class FilterSpec(
      * "old film" finds VINTAGE instead of only matching display names.
      */
     val context: String = "",
+    /**
+     * Filter Lab grade layered on top of this filter, or null for a plain one.
+     * The renderer appends the lab shader as a second chain pass when set, so a
+     * saved recipe behaves like any other strip entry.
+     */
+    val lab: com.retrocam.catalog.lab.LabRecipe? = null,
 )
 
 /**

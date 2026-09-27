@@ -45,6 +45,14 @@ object Shaders {
         uniform float u_theme;
         uniform vec3 u_palette[16];
 
+        // Filter Lab grade (LabGrading.toUniforms). Rows are uploaded as three
+        // vec3s rather than a mat3 so there is no column-major transpose to get
+        // wrong; offset is already divided by 255.
+        uniform vec3 u_ccmR0;
+        uniform vec3 u_ccmR1;
+        uniform vec3 u_ccmR2;
+        uniform vec3 u_ccmOffset;
+
         // All filter code works in FRAME space (0..1 across the destination, so
         // uv * u_resolution is real square pixels). sampleSrc maps any frame
         // coordinate back to the source texture through the combined matrix
@@ -838,6 +846,28 @@ object Shaders {
                 t = hash12(floor(p) + 0.5);
             }
             return vec4(vec3(step(t, luma)), 1.0);
+        }
+    """
+
+    /**
+     * Filter Lab colour grade. Runs as a second chain stage after the base
+     * filter, so `src` is the base filter's output and this applies the recipe's
+     * matrix on top of it.
+     *
+     * The matrix maths lives in LabGrading rather than here; see the note on
+     * why. The only thing left to do in the shader is clamp, because upstream's
+     * `ColorMatrixColorFilter` clamps implicitly by drawing into an 8-bit
+     * Bitmap and several FilterLibrary matrices (POLAROID_70S, CROSS_PROCESS,
+     * DRAMATIC) deliberately push channels past 0-255.
+     */
+    const val LAB_GRADE = """
+        vec4 applyFilter(vec4 src, vec2 uv) {
+            vec3 c = vec3(
+                dot(u_ccmR0, src.rgb),
+                dot(u_ccmR1, src.rgb),
+                dot(u_ccmR2, src.rgb)
+            ) + u_ccmOffset;
+            return vec4(clamp(c, 0.0, 1.0), src.a);
         }
     """
 }

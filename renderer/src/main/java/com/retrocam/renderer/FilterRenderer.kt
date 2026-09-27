@@ -13,6 +13,9 @@ import android.util.Log
 import android.media.MediaRecorder
 import com.retrocam.catalog.FilterSpec
 import com.retrocam.catalog.Shaders
+import com.retrocam.catalog.lab.LabGrading
+import com.retrocam.catalog.lab.LabRecipe
+import com.retrocam.catalog.lab.LabShaderSpec
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -52,6 +55,10 @@ class FilterRenderer(
         val uParam3: Int,
         val uPalette: Int,
         val uFeedback: Int,
+        val uCcmR0: Int,
+        val uCcmR1: Int,
+        val uCcmR2: Int,
+        val uCcmOffset: Int,
         val aPosition: Int,
         val aTexCoord: Int,
     )
@@ -333,8 +340,13 @@ class FilterRenderer(
             renderChain(links, surfaceWidth, surfaceHeight, toScreen = true)
         } else {
             val spec = currentSpec ?: return
-            drawToScreen(spec, currentIntensity, surfaceWidth, surfaceHeight)
-            if (spec.temporal) accumulateTrails(spec, currentIntensity)
+            val recipe = recipeLinks(spec, currentIntensity)
+            if (recipe != null) {
+                renderChain(recipe, surfaceWidth, surfaceHeight, toScreen = true)
+            } else {
+                drawToScreen(spec, currentIntensity, surfaceWidth, surfaceHeight)
+                if (spec.temporal) accumulateTrails(spec, currentIntensity)
+            }
         }
         if (isRecording) renderVideoFrame()
         drainThumbnails()
@@ -418,6 +430,10 @@ class FilterRenderer(
                 uParam3 = GLES20.glGetUniformLocation(p, "u_param3"),
                 uPalette = GLES20.glGetUniformLocation(p, "u_palette"),
                 uFeedback = GLES20.glGetUniformLocation(p, "u_feedback"),
+                uCcmR0 = GLES20.glGetUniformLocation(p, "u_ccmR0"),
+                uCcmR1 = GLES20.glGetUniformLocation(p, "u_ccmR1"),
+                uCcmR2 = GLES20.glGetUniformLocation(p, "u_ccmR2"),
+                uCcmOffset = GLES20.glGetUniformLocation(p, "u_ccmOffset"),
                 // Cached once: glGetAttribLocation per draw was a driver query
                 // on every pass of every frame.
                 aPosition = GLES20.glGetAttribLocation(p, "aPosition"),
@@ -429,6 +445,35 @@ class FilterRenderer(
     private fun drawToScreen(spec: FilterSpec, intensity: Float, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
         drawFullQuad(getProgram(spec), spec, intensity, width, height, timeSeconds())
+    }
+
+    private var recipeSpec: FilterSpec? = null
+    private var recipeIntensity = Float.NaN
+    private var recipeLinksCache: List<ChainLink> = emptyList()
+
+    /**
+     * The passes for a spec carrying a Filter Lab recipe: the base filter, then
+     * the grade. Returns null for a plain filter, which is the common case and
+     * keeps the single-pass path.
+     *
+     * Every render path goes through here — viewfinder, still capture, video
+     * frame and thumbnails — because a recipe that showed in the preview but not
+     * in the saved file would be worse than no recipe at all. Rebuilt only when
+     * the spec or the intensity slider actually moves, so the steady state
+     * allocates nothing per frame.
+     */
+    private fun recipeLinks(spec: FilterSpec, intensity: Float): List<ChainLink>? {
+        val lab = spec.lab ?: return null
+        if (lab.isIdentity) return null
+        if (spec !== recipeSpec || intensity != recipeIntensity) {
+            recipeSpec = spec
+            recipeIntensity = intensity
+            recipeLinksCache = listOf(
+                ChainLink(spec, intensity),
+                ChainLink(LabShaderSpec.spec, intensity),
+            )
+        }
+        return recipeLinksCache
     }
 
     /**
@@ -612,6 +657,14 @@ class FilterRenderer(
         if (prog.uPalette != -1 && palette != null) {
             GLES20.glUniform3fv(prog.uPalette, 16, paletteFloatsCached(palette), 0)
         }
+        val lab = spec.lab
+        if (prog.uCcmR0 != -1 && lab != null) {
+            val ccm = ccmUniformsCached(lab)
+            GLES20.glUniform3f(prog.uCcmR0, ccm[0], ccm[1], ccm[2])
+            GLES20.glUniform3f(prog.uCcmR1, ccm[3], ccm[4], ccm[5])
+            GLES20.glUniform3f(prog.uCcmR2, ccm[6], ccm[7], ccm[8])
+            GLES20.glUniform3f(prog.uCcmOffset, ccm[9], ccm[10], ccm[11])
+        }
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         if (inputIsOES) {
             GLES20.glBindTexture(android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
@@ -737,14 +790,13 @@ class FilterRenderer(
                 return
             }
             GLES20.glViewport(0, 0, encWidth, encHeight)
+            val spec = currentSpec
             val links = chain?.takeIf { it.size >= 1 }
+                ?: spec?.let { recipeLinks(it, currentIntensity) }
             if (links != null) {
                 renderChain(links, encWidth, encHeight, toScreen = false)
-            } else {
-                val spec = currentSpec
-                if (spec != null) {
-                    drawFullQuad(getProgram(spec), spec, currentIntensity, encWidth, encHeight, timeSeconds())
-                }
+            } else if (spec != null) {
+                drawFullQuad(getProgram(spec), spec, currentIntensity, encWidth, encHeight, timeSeconds())
             }
             // EGL10 has no eglPresentationTimeANDROID; the encoder surface is a
             // BufferQueue, so eglSwapBuffers stamps the frame itself.
@@ -874,16 +926,21 @@ class FilterRenderer(
         var readIsOES = true
         links.forEachIndexed { index, link ->
             val last = index == links.lastIndex
+            // Link 0 samples the camera's external OES texture; every later link
+            // samples the previous link's FBO, which is an ordinary 2D texture.
+            // The program must be the matching variant, or the declared sampler
+            // type disagrees with what is bound and the pass reads garbage.
+            val twoD = !readIsOES
             if (last && toScreen) {
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
                 GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight)
-                drawFullQuad(getProgram(link.spec), link.spec, link.intensity, w, h, time, readTex, readIsOES, true)
+                drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, w, h, time, readTex, readIsOES, true)
                 return@forEachIndexed
             }
             val targetFbo = if (index % 2 == 0) pair.fboA else pair.fboB
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, targetFbo)
             GLES20.glViewport(0, 0, workW, workH)
-            drawFullQuad(getProgram(link.spec), link.spec, link.intensity, workW, workH, time, readTex, readIsOES, last)
+            drawFullQuad(getProgram(link.spec, twoD), link.spec, link.intensity, workW, workH, time, readTex, readIsOES, last)
             readTex = if (index % 2 == 0) pair.texA else pair.texB
             readIsOES = false
         }
@@ -990,6 +1047,7 @@ class FilterRenderer(
             if (!egl.eglMakeCurrent(display, surface, surface, context)) return null
             GLES20.glViewport(0, 0, width, height)
             val chainLinks = (links ?: chain)?.takeIf { it.size >= 1 }
+                ?: recipeLinks(spec, intensity)
             if (chainLinks != null) {
                 renderChain(chainLinks, width, height, toScreen = false, pair = offChain)
             } else {
@@ -1039,7 +1097,14 @@ class FilterRenderer(
         try {
             if (!egl.eglMakeCurrent(display, thumbSurface, thumbSurface, context)) return null
             GLES20.glViewport(0, 0, size, size)
-            drawFullQuad(getProgram(spec), spec, 1f, size, size, timeSeconds())
+            // Thumbnails for a saved recipe must show its grade, or the strip
+            // icon would not match what the camera does.
+            val recipe = recipeLinks(spec, 1f)
+            if (recipe != null) {
+                renderChain(recipe, size, size, toScreen = false, pair = offChain)
+            } else {
+                drawFullQuad(getProgram(spec), spec, 1f, size, size, timeSeconds())
+            }
             return readbackCurrent(size, size)
         } finally {
             egl.eglMakeCurrent(display, draw, read, context)
@@ -1223,6 +1288,22 @@ class FilterRenderer(
             cachedPaletteFloats = out
             return out
         }
+
+        /**
+         * Same trick for the Filter Lab grade. The recipe is immutable, so an
+         * unchanged instance means unchanged uniforms and this is free. Editing a
+         * slider hands us a new instance and we recompute once.
+         */
+        fun ccmUniformsCached(recipe: LabRecipe): FloatArray {
+            if (recipe === cachedRecipe) return cachedCcm
+            val out = LabGrading.uniformsFor(recipe.templateMatrix(), recipe.adjustments)
+            cachedRecipe = recipe
+            cachedCcm = out
+            return out
+        }
+
+        @JvmStatic private var cachedRecipe: LabRecipe? = null
+        @JvmStatic private var cachedCcm: FloatArray = FloatArray(12)
 
         @JvmStatic private var cachedPalette: IntArray? = null
         @JvmStatic private var cachedPaletteFloats: FloatArray = FloatArray(48)
