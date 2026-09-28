@@ -353,7 +353,6 @@ fun LabScreen(viewModel: CameraViewModel) {
             onBw = viewModel::setBw,
             onCal = viewModel::setCal,
             onDefringe = viewModel::setDefringe,
-            onGeoMode = viewModel::setGeoMode,
             onParametric = viewModel::setLabParametric,
             onClearCurves = viewModel::clearLabCurves,
             onEffect = viewModel::setLabEffect,

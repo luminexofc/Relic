@@ -681,18 +681,6 @@ class CameraViewModel @Inject constructor(
         pendingSelectedRecipe = null
         _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withDefringe(slot, value)) }
     }
-    fun setGeoMode(mode: Int) {
-        pendingSelectedRecipe = null
-        _uiState.update { s ->
-            val cur = s.labRecipe.geoArray() ?: com.retrocam.catalog.lab.Geometry.defaults()
-            val next = cur.copyOf(); next[0] = mode.coerceIn(0, 5).toFloat()
-            // Level zeroes tilt; Vertical zeroes horizontal; Full keeps both.
-            if (mode == 3) { next[1] = 0f; next[2] = 0f }
-            if (mode == 4) { next[2] = 0f }
-            s.copy(labRecipe = s.labRecipe.copy(geometry = com.retrocam.catalog.lab.Geometry.encode(next)))
-        }
-    }
-
     /** Updates one effect amount. [which] indexes [com.retrocam.catalog.lab.LAB_EFFECTS]. */
     fun setLabEffect(which: Int, value: Float) {
         pendingSelectedRecipe = null

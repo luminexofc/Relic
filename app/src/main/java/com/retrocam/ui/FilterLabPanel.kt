@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Camera
-import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -63,7 +62,6 @@ import com.retrocam.catalog.lab.BwMix
 import com.retrocam.catalog.lab.Calibration
 import com.retrocam.catalog.lab.ColorGrade
 import com.retrocam.catalog.lab.Defringe
-import com.retrocam.catalog.lab.Geometry
 import com.retrocam.catalog.lab.Hsl
 import com.retrocam.catalog.lab.LAB_EFFECTS
 import com.retrocam.catalog.lab.LabKnob
@@ -107,7 +105,6 @@ fun FilterLabPanel(
     onBw: (Int, Float) -> Unit,
     onCal: (Int, Float) -> Unit,
     onDefringe: (Int, Float) -> Unit,
-    onGeoMode: (Int) -> Unit,
     onParametric: (Int, Float) -> Unit,
     onClearCurves: () -> Unit,
     onEffect: (Int, Float) -> Unit,
@@ -282,9 +279,6 @@ fun FilterLabPanel(
                 }
                 LabGroup.OPTICS -> {
                     KnobSliders(LabKnobGroup.OPTICS, recipe, accent, dim, onKnob, onResetKnob)
-                }
-                LabGroup.GEOMETRY -> {
-                    GeoControls(recipe, accent, dim, onGeoMode, onKnob, onResetKnob)
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -666,6 +660,20 @@ private val TINT_SWATCHES = listOf(
     0xFF5A4632.toInt(), 0xFF3A2A4A.toInt(), 0xFF4A2A2A.toInt(),
 )
 
+/**
+ * A representative colour for each of the eight mixer bands, in [Hsl.BAND_NAMES]
+ * order.
+ *
+ * The picker is these swatches rather than the band names: eight rows of
+ * "RED HUE / SAT / LUM" told you the name of a band you could already see, and
+ * the colour itself is the thing the slider is about. Aqua and magenta are the
+ * two that are not obvious from the word alone, which is why the caption stays.
+ */
+private val BAND_SWATCHES = listOf(
+    0xFFE53935.toInt(), 0xFFF57C00.toInt(), 0xFFFDD835.toInt(), 0xFF43A047.toInt(),
+    0xFF00ACC1.toInt(), 0xFF1E88E5.toInt(), 0xFF8E24AA.toInt(), 0xFFD81B60.toInt(),
+)
+
 @Composable
 private fun DuotoneColours(
     recipe: com.retrocam.catalog.lab.LabRecipe,
@@ -925,7 +933,6 @@ private enum class LabGroup(val title: String, val icon: androidx.compose.ui.gra
     EFFECTS("Effects", Icons.Filled.AutoAwesome),
     DETAIL("Detail", Icons.Filled.Tune),
     OPTICS("Optics", Icons.Filled.Camera),
-    GEOMETRY("Frame", Icons.Filled.Crop),
 }
 
 /** The horizontal icon rail that picks a group. */
@@ -1103,7 +1110,7 @@ private fun HslSliders(
     ) {
         Hsl.BAND_NAMES.forEachIndexed { b, name ->
             val moved = (0..2).any { ch -> recipe.hslBand(b, ch) != 0f }
-            BandChip(name, b == band, moved, accent, dim) { band = b }
+            BandSwatch(name, BAND_SWATCHES[b], b == band, moved, accent, dim) { band = b }
         }
     }
     Spacer(Modifier.height(4.dp))
@@ -1115,14 +1122,62 @@ private fun HslSliders(
 }
 
 /**
- * One hue band in the mixer picker.
+ * One hue band, shown as the colour it stands for.
  *
- * The dot is the point of this control over a plain list of names: it shows
- * which colours are off neutral without opening them, so an imported preset's
- * colour mixer is visible in one glance instead of twenty-four rows of reading.
+ * Selection is a ring rather than a fill change, because the fill is the band's
+ * own colour and tinting it would destroy the thing you are identifying it by.
+ * The underline marks a band the recipe has moved, so an imported preset's
+ * mixer is still readable at a glance now that the values are hidden.
  */
 @Composable
-private fun BandChip(
+private fun BandSwatch(
+    label: String,
+    argb: Int,
+    selected: Boolean,
+    moved: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit,
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color(argb))
+                .border(
+                    width = if (selected) 2.dp else 1.dp,
+                    color = if (selected) accent else dim.copy(alpha = 0.3f),
+                    shape = CircleShape,
+                )
+                .clickable(onClick = onClick),
+        )
+        Spacer(Modifier.height(2.dp))
+        Box(
+            Modifier
+                .size(width = 14.dp, height = 2.dp)
+                .clip(CircleShape)
+                .background(if (moved) accent else androidx.compose.ui.graphics.Color.Transparent),
+        )
+        Text(
+            label,
+            fontFamily = AppType.Sans,
+            fontSize = 8.sp,
+            color = if (selected) accent else dim,
+        )
+    }
+}
+
+/**
+ * A small selectable chip, for picking what the sliders underneath apply to.
+ *
+ * Used where there is no colour to show for the choice - the three tone ranges
+ * of a grade, the three primaries of a calibration - so a word is the honest
+ * label. One row of these replaces a flat list of every channel, which is the
+ * same fix the mixer got.
+ */
+@Composable
+private fun ChoiceChip(
     label: String,
     selected: Boolean,
     moved: Boolean,
@@ -1135,7 +1190,7 @@ private fun BandChip(
             .border(1.dp, if (selected) accent else dim.copy(alpha = 0.35f), RoundedCornerShape(50))
             .background(if (selected) accent.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (moved) {
@@ -1151,7 +1206,17 @@ private fun BandChip(
     }
 }
 
-/** The 3-way colour grade: hue and saturation per range, plus blend and balance. */
+/**
+ * The 3-way colour grade, one tone range at a time.
+ *
+ * Eight flat sliders where the first six are really three pairs: shadows,
+ * midtones and highlights, each with a hue and a saturation. Showing the pairs
+ * flat means scrolling past hue, sat, hue, sat to compare one range with
+ * another. Picking the range shows its two channels, and the two global
+ * controls that are not per-range stay visible underneath because they affect
+ * all three at once.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GradeSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
@@ -1160,13 +1225,31 @@ private fun GradeSliders(
     onGrade: (Int, Float) -> Unit,
 ) {
     val g = remember(recipe.colorGrade) { recipe.gradeArray() ?: ColorGrade.defaults() }
-    val names = listOf("SH HUE", "SH SAT", "MID HUE", "MID SAT", "HI HUE", "HI SAT", "BLEND", "BALANCE")
-    names.forEachIndexed { i, label ->
-        val range = when (i) { 7 -> -1f to 1f; else -> 0f to 1f }
-        val neutral = if (i == 6) 0.5f else 0f
-        LabSlider(label, g[i], range.first, range.second, accent, dim, { onGrade(i, it) }, neutral = neutral,
-            onReset = { onGrade(i, neutral) })
+    val firstMoved = (0..2).firstOrNull { r -> g[r * 2] != 0f || g[r * 2 + 1] != 0f } ?: 0
+    var range by remember { mutableStateOf(firstMoved) }
+    val rangeNames = listOf("SHADOWS", "MIDTONES", "HIGHLIGHTS")
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        rangeNames.forEachIndexed { r, name ->
+            ChoiceChip(name, r == range, g[r * 2] != 0f || g[r * 2 + 1] != 0f, accent, dim) { range = r }
+        }
     }
+    Spacer(Modifier.height(4.dp))
+    listOf("HUE" to 0, "SAT" to 1).forEach { (label, ch) ->
+        val slot = range * 2 + ch
+        LabSlider("${rangeNames[range]} $label", g[slot], 0f, 1f, accent, dim, { onGrade(slot, it) },
+            neutral = 0f, onReset = { onGrade(slot, 0f) })
+    }
+    // Blend and balance shape how the three ranges meet, so they apply to all of
+    // them and stay out of the range picker rather than hiding in it.
+    Spacer(Modifier.height(6.dp))
+    LabSlider("BLEND", g[6], 0f, 1f, accent, dim, { onGrade(6, it) },
+        neutral = 0.5f, onReset = { onGrade(6, 0.5f) })
+    LabSlider("BALANCE", g[7], -1f, 1f, accent, dim, { onGrade(7, it) },
+        neutral = 0f, onReset = { onGrade(7, 0f) })
 }
 
 /** The channel mix that turns a grayscale image into a toned black and white. */
@@ -1183,7 +1266,15 @@ private fun BwSliders(
     }
 }
 
-/** Adobe's Calibration: hue and saturation on each of the three primaries. */
+/**
+ * Adobe's Calibration, one primary at a time.
+ *
+ * The same pair-per-choice shape as the grade: three primaries, each with a hue
+ * and a saturation, so six interleaved rows become three chips and two sliders.
+ * Swatches carry the primary's colour, which is the one thing here that is
+ * literally a colour.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CalSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
@@ -1192,10 +1283,26 @@ private fun CalSliders(
     onCal: (Int, Float) -> Unit,
 ) {
     val parts = remember(recipe.calibration) { recipe.calibrationParts() }
-    val h = parts?.first ?: FloatArray(3); val s = parts?.second ?: FloatArray(3)
-    listOf("RED HUE" to h[0], "RED SAT" to s[0], "GREEN HUE" to h[1], "GREEN SAT" to s[1], "BLUE HUE" to h[2], "BLUE SAT" to s[2]).forEachIndexed { i, (label, v) ->
-        LabSlider(label, v, -1f, 1f, accent, dim, { onCal(i, it) }, neutral = 0f, onReset = { onCal(i, 0f) })
+    val h = parts?.first ?: FloatArray(3)
+    val s = parts?.second ?: FloatArray(3)
+    val firstMoved = (0..2).firstOrNull { i -> h[i] != 0f || s[i] != 0f } ?: 0
+    var primary by remember { mutableStateOf(firstMoved) }
+    val names = listOf("RED", "GREEN", "BLUE")
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        names.forEachIndexed { i, name ->
+            ChoiceChip(name, i == primary, h[i] != 0f || s[i] != 0f, accent, dim) { primary = i }
+        }
     }
+    Spacer(Modifier.height(4.dp))
+    // Slots are interleaved hue, sat, hue, sat, so slot 2i is the hue.
+    LabSlider("${names[primary]} HUE", h[primary], -1f, 1f, accent, dim, { onCal(primary * 2, it) },
+        neutral = 0f, onReset = { onCal(primary * 2, 0f) })
+    LabSlider("${names[primary]} SAT", s[primary], -1f, 1f, accent, dim, { onCal(primary * 2 + 1, it) },
+        neutral = 0f, onReset = { onCal(primary * 2 + 1, 0f) })
 }
 
 /** Chromatic aberration removal, as two hue ranges with an amount each. */
@@ -1212,41 +1319,6 @@ private fun DefringeSliders(
         LabSlider(label, cur[i], 0f, 1f, accent, dim, { onDefringe(i, it) }, neutral = Defringe.defaults()[i],
             onReset = { onDefringe(i, Defringe.defaults()[i]) })
     }
-}
-
-/** Geometry: the mode presets on top, the seven manual corrections below. */
-@Composable
-private fun GeoControls(
-    recipe: com.retrocam.catalog.lab.LabRecipe,
-    accent: androidx.compose.ui.graphics.Color,
-    dim: androidx.compose.ui.graphics.Color,
-    onGeoMode: (Int) -> Unit,
-    onKnob: (Int, Float) -> Unit,
-    onResetKnob: (Int) -> Unit,
-) {
-    val cur = remember(recipe.geometry) { recipe.geoArray() ?: Geometry.defaults() }
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Geometry.MODE_NAMES.forEachIndexed { i, m ->
-            val sel = cur[0].toInt() == i
-            Box(
-                Modifier.background(if (sel) accent else MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
-                    .clickable { onGeoMode(i) }.padding(horizontal = 10.dp, vertical = 5.dp),
-            ) {
-                Text(m, fontFamily = AppType.Sans, fontSize = 9.sp,
-                    color = if (sel) androidx.compose.ui.graphics.Color.Black else MaterialTheme.colorScheme.onBackground)
-            }
-        }
-    }
-    // Auto/Guided/Level are presets (no scene analysis); manual sliders below.
-    listOf("GEO VERTICAL", "GEO HORIZONTAL", "GEO ROTATE", "GEO ASPECT", "GEO SCALE", "GEO X", "GEO Y").forEach { label ->
-        val k = LabKnob.byLabel(label) ?: return@forEach
-        val i = LabKnob.entries.indexOf(k)
-        val range = when (label) { "GEO SCALE" -> 0f to 1f; else -> -1f to 1f }
-        LabSlider(label, recipe.knobValue(k), range.first, range.second, accent, dim, { onKnob(i, it) },
-            neutral = 0f, onReset = { onResetKnob(i) })
-    }
-    Text("Auto levels tilt, Guided sets manual lines (sliders), Full corrects both axes.",
-        fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
 }
 
 /** The stylize effects: blur, glitch, duotone. The rest of the effects are knobs. */
