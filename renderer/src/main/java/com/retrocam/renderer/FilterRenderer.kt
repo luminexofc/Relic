@@ -99,6 +99,28 @@ class FilterRenderer(
         val uGrainRough: Int,
         val uVigMid: Int,
         val uVigFeather: Int,
+        val uVigRound: Int,
+        val uVigAspect: Int,
+        val uVibrance: Int,
+        val uGradeA: Int,
+        val uGradeB: Int,
+        val uGradeActive: Int,
+        val uBwMixA: Int,
+        val uBwMixB: Int,
+        val uBwActive: Int,
+        val uNrLum: Int,
+        val uNrColor: Int,
+        val uDefringeA: Int,
+        val uDefringeB: Int,
+        val uDefringeActive: Int,
+        val uLensCA: Int,
+        val uLensEnable: Int,
+        val uLensDistort: Int,
+        val uLensBlur: Int,
+        val uLensFocus: Int,
+        val uGeoA: Int,
+        val uGeoB: Int,
+        val uGeoActive: Int,
         val uCurve: Int,
         val uCurveAmount: Int,
         val uGamma: Int,
@@ -749,6 +771,28 @@ class FilterRenderer(
                 uGrainRough = GLES20.glGetUniformLocation(p, "u_grainRough"),
                 uVigMid = GLES20.glGetUniformLocation(p, "u_vigMid"),
                 uVigFeather = GLES20.glGetUniformLocation(p, "u_vigFeather"),
+                uVigRound = GLES20.glGetUniformLocation(p, "u_vigRound"),
+                uVigAspect = GLES20.glGetUniformLocation(p, "u_vigAspect"),
+                uVibrance = GLES20.glGetUniformLocation(p, "u_vibrance"),
+                uGradeA = GLES20.glGetUniformLocation(p, "u_gradeA"),
+                uGradeB = GLES20.glGetUniformLocation(p, "u_gradeB"),
+                uGradeActive = GLES20.glGetUniformLocation(p, "u_gradeActive"),
+                uBwMixA = GLES20.glGetUniformLocation(p, "u_bwMixA"),
+                uBwMixB = GLES20.glGetUniformLocation(p, "u_bwMixB"),
+                uBwActive = GLES20.glGetUniformLocation(p, "u_bwActive"),
+                uNrLum = GLES20.glGetUniformLocation(p, "u_nrLum"),
+                uNrColor = GLES20.glGetUniformLocation(p, "u_nrColor"),
+                uDefringeA = GLES20.glGetUniformLocation(p, "u_defringeA"),
+                uDefringeB = GLES20.glGetUniformLocation(p, "u_defringeB"),
+                uDefringeActive = GLES20.glGetUniformLocation(p, "u_defringeActive"),
+                uLensCA = GLES20.glGetUniformLocation(p, "u_lensCA"),
+                uLensEnable = GLES20.glGetUniformLocation(p, "u_lensEnable"),
+                uLensDistort = GLES20.glGetUniformLocation(p, "u_lensDistort"),
+                uLensBlur = GLES20.glGetUniformLocation(p, "u_lensBlur"),
+                uLensFocus = GLES20.glGetUniformLocation(p, "u_lensFocus"),
+                uGeoA = GLES20.glGetUniformLocation(p, "u_geoA"),
+                uGeoB = GLES20.glGetUniformLocation(p, "u_geoB"),
+                uGeoActive = GLES20.glGetUniformLocation(p, "u_geoActive"),
                 uCurve = GLES20.glGetUniformLocation(p, "u_curve"),
                 uCurveAmount = GLES20.glGetUniformLocation(p, "u_curveAmount"),
                 uGamma = GLES20.glGetUniformLocation(p, "u_gamma"),
@@ -1123,6 +1167,28 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uGrainRough, u.grainRough)
             GLES20.glUniform1f(prog.uVigMid, u.vigMid)
             GLES20.glUniform1f(prog.uVigFeather, u.vigFeather)
+            GLES20.glUniform1f(prog.uVigRound, u.vigRound)
+            GLES20.glUniform1f(prog.uVigAspect, u.vigAspect)
+            GLES20.glUniform1f(prog.uVibrance, u.vibrance)
+            GLES20.glUniform4f(prog.uGradeA, u.grade[0], u.grade[1], u.grade[2], u.grade[3])
+            GLES20.glUniform4f(prog.uGradeB, u.grade[4], u.grade[5], u.grade[6], u.grade[7])
+            GLES20.glUniform1f(prog.uGradeActive, u.gradeActive)
+            GLES20.glUniform4f(prog.uBwMixA, u.bwMix[0], u.bwMix[1], u.bwMix[2], u.bwMix[3])
+            GLES20.glUniform4f(prog.uBwMixB, u.bwMix[4], u.bwMix[5], u.bwMix[6], u.bwMix[7])
+            GLES20.glUniform1f(prog.uBwActive, u.bwActive)
+            GLES20.glUniform1f(prog.uNrLum, u.denoiseLum)
+            GLES20.glUniform1f(prog.uNrColor, u.denoiseColor)
+            GLES20.glUniform4f(prog.uDefringeA, u.defringe[0], u.defringe[1], u.defringe[2], u.defringe[3])
+            GLES20.glUniform4f(prog.uDefringeB, u.defringe[4], u.defringe[5], u.defringeActive, u.lensCA)
+            GLES20.glUniform1f(prog.uDefringeActive, u.defringeActive)
+            GLES20.glUniform1f(prog.uLensCA, u.lensCA)
+            GLES20.glUniform1f(prog.uLensEnable, u.lensEnable)
+            GLES20.glUniform1f(prog.uLensDistort, u.lensDistort)
+            GLES20.glUniform1f(prog.uLensBlur, u.lensBlur)
+            GLES20.glUniform1f(prog.uLensFocus, u.lensFocus)
+            GLES20.glUniform4f(prog.uGeoA, u.geometry[0], u.geometry[1], u.geometry[2], u.geometry[3])
+            GLES20.glUniform4f(prog.uGeoB, u.geometry[4], u.geometry[5], u.geometry[6], u.geometry[7])
+            GLES20.glUniform1f(prog.uGeoActive, u.geoActive)
             GLES20.glUniform1f(prog.uGamma, u.gamma)
         if (prog.uCurve != -1) {
             GLES20.glUniform1f(prog.uCurveAmount, u.curveAmount)

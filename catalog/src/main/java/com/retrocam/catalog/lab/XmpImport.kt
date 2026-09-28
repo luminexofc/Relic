@@ -184,14 +184,14 @@ object XmpImport {
         // Crop is framing, not grading, and the Lab does not crop.
         "CropAmount", "CropTop", "CropLeft", "CropBottom", "CropRight",
         // Raw converter inputs. Honouring these means DNG profile support.
-        "CameraProfile", "LensProfileEnable", "LensProfileSetup", "LensManualDistortionAmount",
-        "AutoLateralCA", "CalibrationIlluminant1", "CalibrationIlluminant2",
+        "CameraProfile", "LensProfileSetup",
+        "CalibrationIlluminant1", "CalibrationIlluminant2",
         "CalibrationHue", "CalibrationSat", "AsShotNeutral",
     )
 
-    /** Optical geometry: a lens correction, not a grade. */
+    /** Non-look prefixes. Lens/Geometry are now real controls, not metadata. */
     private val NOT_A_LOOK_PREFIXES = listOf(
-        "Perspective", "LensProfile", "CameraCalibration", "WB",
+        "CameraCalibration", "WB",
     )
 
     /** Historical: never reported at all. A strict subset of NOT_A_LOOK. */
@@ -266,6 +266,48 @@ object XmpImport {
         "GreenSaturation" to emptyList(),
         "BlueHue" to emptyList(),
         "BlueSaturation" to emptyList(),
+        // Vignette shape (now real controls).
+        "PostCropVignetteRoundness" to emptyList(),
+        "PostCropVignetteAspect" to emptyList(),
+        // Detail noise.
+        "LuminanceSmoothing" to emptyList(),
+        "ColorNoiseReduction" to emptyList(),
+        // Defringe.
+        "DefringePurpleAmount" to emptyList(),
+        "DefringePurpleHueLo" to emptyList(),
+        "DefringePurpleHueHi" to emptyList(),
+        "DefringeGreenAmount" to emptyList(),
+        "DefringeGreenHueLo" to emptyList(),
+        "DefringeGreenHueHi" to emptyList(),
+        // Optics / geometry (now real controls).
+        "LensProfileEnable" to emptyList(),
+        "LensManualDistortionAmount" to emptyList(),
+        "AutoLateralCA" to emptyList(),
+        "PerspectiveVertical" to emptyList(),
+        "PerspectiveHorizontal" to emptyList(),
+        "PerspectiveRotate" to emptyList(),
+        "PerspectiveScale" to emptyList(),
+        "PerspectiveAspect" to emptyList(),
+        "PerspectiveX" to emptyList(),
+        "PerspectiveY" to emptyList(),
+        "PerspectiveUpright" to emptyList(),
+        // New color grading + B&W mixer families.
+        "ColorGradeMidtoneHue" to emptyList(),
+        "ColorGradeMidtoneSat" to emptyList(),
+        "ColorGradeShadowHue" to emptyList(),
+        "ColorGradeShadowSat" to emptyList(),
+        "ColorGradeHighlightHue" to emptyList(),
+        "ColorGradeHighlightSat" to emptyList(),
+        "ColorGradeBlending" to emptyList(),
+        "ColorGradeBalance" to emptyList(),
+        "GrayMixerRed" to emptyList(),
+        "GrayMixerOrange" to emptyList(),
+        "GrayMixerYellow" to emptyList(),
+        "GrayMixerGreen" to emptyList(),
+        "GrayMixerAqua" to emptyList(),
+        "GrayMixerBlue" to emptyList(),
+        "GrayMixerPurple" to emptyList(),
+        "GrayMixerMagenta" to emptyList(),
     )
 
     /**
@@ -317,6 +359,7 @@ object XmpImport {
         var gamma = 1f
         var contrast = 1f
         var saturation = 1f
+        var vibrance = 0f
         var warmth = 0f
         var tint = 0f
         var sharpen = 0f
@@ -328,7 +371,11 @@ object XmpImport {
         var grainRough = 0.5f
         var vigMid = 0.5f
         var vigFeather = 0.5f
+        var vigRound = 0.5f
+        var vigAspect = 0.5f
         var vignette = 0f
+        var denoiseLum = 0f
+        var denoiseColor = 0f
 
         // Old split toning, whose hue/saturation pairs become two colours.
         var shadowHue = 0f
@@ -425,12 +472,10 @@ object XmpImport {
             contrast = (1f + normalised / 100f).coerceIn(0f, 3f)
         }
 
-        // ---- saturation, from Saturation and Vibrance together ----
-        // Lightroom applies both, and Vibrance protects skin tones, so they
-        // multiply rather than one replacing the other. A preset that sets only
-        // Vibrance still does something.
+        // ---- saturation and vibrance, now separate controls. Vibrance protects
+        // skin tones (low-sat boost), saturation is uniform.
         knob("Saturation", "SATURATION") { _, v -> saturation *= 1f + v / 100f }
-        knob("Vibrance", "SATURATION", approx = true) { _, v -> saturation *= 1f + v / 100f }
+        knob("Vibrance", "VIBRANCE") { _, v -> vibrance = (v / 100f).coerceIn(-1f, 1f) }
         saturation = saturation.coerceIn(0f, 3f)
 
         // ---- sharpness -> the sharpen effect ----
@@ -699,31 +744,104 @@ object XmpImport {
             splitHighlightTint = packRgb(c[0], c[1], c[2])
         }
 
-        // ---- Defringe: purple and green fringing removal ----
-        //
-        // Not implemented, and named rather than skipped. Each of the two has an
-        // amount plus a hue range, so honouring it means masking by hue and
-        // desaturating inside that range - which is a real operator, not a
-        // scalar, and one whose visual effect is small on a phone lens that has
-        // mostly already had it corrected. The keys are reported so the gap is
-        // visible instead of the report looking complete.
-        for (k in listOf(
-            "DefringePurpleAmount", "DefringeGreenAmount",
-            "DefringePurpleHueLo", "DefringePurpleHueHi",
-            "DefringeGreenHueLo", "DefringeGreenHueHi",
-        )) {
-            drop(k, "hue-masked fringing removal; not implemented")
+        // ---- Vignette shape (now real controls, not dropped) ----
+        knob("PostCropVignetteRoundness", "VIGNETTE ROUNDNESS", approx = true) { _, v ->
+            vigRound = ((v + 100f) / 200f).coerceIn(0f, 1f)
+        }
+        knob("PostCropVignetteAspect", "VIGNETTE ASPECT", approx = true) { _, v ->
+            vigAspect = ((v + 100f) / 200f).coerceIn(0f, 1f)
         }
 
-        // ---- noise reduction: luminance and colour ----
-        //
-        // Not implemented, and this one is a real limit rather than a choice.
-        // Both are neighbourhood statistics: how much a pixel differs from the
-        // median of its surroundings. That does not fit a fragment shader,
-        // which sees one pixel at a time, and approximating it with a blur
-        // would smooth real detail rather than noise.
-        for (k in listOf("LuminanceSmoothing", "ColorNoiseReduction")) {
-            drop(k, "neighbourhood noise reduction; needs a compute pass, not a fragment shader")
+        // ---- Noise reduction: edge-masked luminance + chroma smoothing.
+        // Honest approx of neighbourhood stats with one shared blur; flat areas
+        // smooth, edges preserved.
+        knob("LuminanceSmoothing", "NOISE LUMINANCE") { _, v ->
+            denoiseLum = (v / 100f).coerceIn(0f, 1f)
+        }
+        knob("ColorNoiseReduction", "NOISE COLOR") { _, v ->
+            denoiseColor = (v / 100f).coerceIn(0f, 1f)
+        }
+
+        // ---- Defringe: hue-masked desat, purple + green.
+        val def = FloatArray(6).apply {
+            val d = Defringe.defaults(); for (i in 0 until 6) this[i] = d[i]
+        }
+        var anyDef = false
+        knob("DefringePurpleAmount", "DEFRINGE PURPLE") { _, v -> def[0] = (v / 100f).coerceIn(0f, 1f); anyDef = true }
+        knob("DefringePurpleHueLo", "DEFRINGE PURPLE LO", approx = true) { _, v -> def[1] = (v / 360f).coerceIn(0f, 1f); anyDef = true }
+        knob("DefringePurpleHueHi", "DEFRINGE PURPLE HI", approx = true) { _, v -> def[2] = (v / 360f).coerceIn(0f, 1f); anyDef = true }
+        knob("DefringeGreenAmount", "DEFRINGE GREEN") { _, v -> def[3] = (v / 100f).coerceIn(0f, 1f); anyDef = true }
+        knob("DefringeGreenHueLo", "DEFRINGE GREEN LO", approx = true) { _, v -> def[4] = (v / 360f).coerceIn(0f, 1f); anyDef = true }
+        knob("DefringeGreenHueHi", "DEFRINGE GREEN HI", approx = true) { _, v -> def[5] = (v / 360f).coerceIn(0f, 1f); anyDef = true }
+        var lensCAFlag = 0f
+        resolve(a, "AutoLateralCA", consumed)?.let { (name, raw) ->
+            when (raw.trim()) {
+                "True", "true", "1" -> { lensCAFlag = 1f; add(name, raw, "REMOVE CA") }
+                "False", "false", "0" -> neutral(name, raw)
+                else -> drop(name, "not a boolean")
+            }
+        }
+
+        // ---- Optics: lens corrections + manual distort + lens blur hooks.
+        // Lens blur amount itself has no XMP key (AI depth blur); manual distort does.
+        var lensEnableFlag = 0f
+        var lensDistortVal = 0f
+        resolve(a, "LensProfileEnable", consumed)?.let { (name, raw) ->
+            when (raw.trim()) {
+                "True", "true", "1" -> { lensEnableFlag = 1f; add(name, raw, "LENS CORRECTIONS") }
+                "False", "false", "0" -> neutral(name, raw)
+                else -> drop(name, "not a boolean")
+            }
+        }
+        knob("LensManualDistortionAmount", "LENS DISTORTION", approx = true) { _, v ->
+            lensDistortVal = (v / 100f).coerceIn(-1f, 1f)
+            if (lensEnableFlag == 0f) lensEnableFlag = 1f
+        }
+
+        // ---- Geometry: Upright mode + 7 manual sliders. Auto/Guided/Level are
+        // presets that set the sliders (no scene analysis on device).
+        val geo = FloatArray(8)
+        var anyGeo = false
+        resolve(a, "PerspectiveUpright", consumed)?.let { (name, raw) ->
+            val mode = when (raw.trim()) {
+                "0", "Off", "off" -> 0; "1", "Auto", "auto" -> 1
+                "2", "Guided", "guided" -> 2; "3", "Level", "level" -> 3
+                "4", "Vertical", "vertical" -> 4; "5", "Full", "full" -> 5
+                else -> null
+            }
+            if (mode == null) drop(name, "unknown upright mode")
+            else {
+                geo[0] = mode.toFloat(); anyGeo = true
+                add(name, raw, "GEOMETRY ${Geometry.MODE_NAMES[mode]}", approx = mode != 0)
+            }
+        }
+        knob("PerspectiveVertical", "GEO VERTICAL") { _, v -> geo[1] = (v / 100f).coerceIn(-1f, 1f); anyGeo = true }
+        knob("PerspectiveHorizontal", "GEO HORIZONTAL") { _, v -> geo[2] = (v / 100f).coerceIn(-1f, 1f); anyGeo = true }
+        knob("PerspectiveRotate", "GEO ROTATE", approx = true) { _, v -> geo[3] = (v / 30f).coerceIn(-1f, 1f); anyGeo = true }
+        knob("PerspectiveAspect", "GEO ASPECT", approx = true) { _, v -> geo[4] = (v / 100f).coerceIn(-1f, 1f); anyGeo = true }
+        knob("PerspectiveScale", "GEO SCALE", approx = true, isNeutralAtZero = 100f) { _, v ->
+            geo[5] = ((v - 100f) / 100f).coerceIn(0f, 1f); anyGeo = true
+        }
+        knob("PerspectiveX", "GEO X") { _, v -> geo[6] = (v / 100f).coerceIn(-1f, 1f); anyGeo = true }
+        knob("PerspectiveY", "GEO Y") { _, v -> geo[7] = (v / 100f).coerceIn(-1f, 1f); anyGeo = true }
+
+        // ---- Color Grading 3-way (new wheels, supersedes split toning).
+        val grade = ColorGrade.defaults()
+        var anyGrade = false
+        knob("ColorGradeShadowHue", "GRADE SHADOW HUE", approx = true) { _, v -> grade[0] = (v / 360f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeShadowSat", "GRADE SHADOW SAT") { _, v -> grade[1] = (v / 100f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeMidtoneHue", "GRADE MID HUE", approx = true) { _, v -> grade[2] = (v / 360f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeMidtoneSat", "GRADE MID SAT") { _, v -> grade[3] = (v / 100f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeHighlightHue", "GRADE HIGH HUE", approx = true) { _, v -> grade[4] = (v / 360f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeHighlightSat", "GRADE HIGH SAT") { _, v -> grade[5] = (v / 100f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeBlending", "GRADE BLEND", approx = true) { _, v -> grade[6] = (v / 100f).coerceIn(0f, 1f); anyGrade = true }
+        knob("ColorGradeBalance", "GRADE BALANCE", approx = true) { _, v -> grade[7] = (v / 100f).coerceIn(-1f, 1f); anyGrade = true }
+
+        // ---- B&W mixer (8 bands, only applies when grayscale on).
+        val bw = FloatArray(8)
+        var anyBw = false
+        listOf("Red" to 0, "Orange" to 1, "Yellow" to 2, "Green" to 3, "Aqua" to 4, "Blue" to 5, "Purple" to 6, "Magenta" to 7).forEach { (suf, slot) ->
+            knob("GrayMixer$suf", "B&W $suf".uppercase()) { _, v -> bw[slot] = (v / 100f).coerceIn(-1f, 1f); anyBw = true }
         }
 
         // ---- ShadowTint: the calibration panel's shadow bias ----
@@ -746,9 +864,6 @@ object XmpImport {
 
         // ---- everything else, reported rather than silently dropped ----
         for (k in listOf("AutoBrightness", "Auto Tone")) drop(k, "needs a scene analysis")
-        for (k in listOf("PostCropVignetteRoundness", "PostCropVignetteAspect")) {
-            drop(k, "changes the falloff shape, not its strength; not implemented")
-        }
 
         drop("Look", "an enum naming a curve set; no honest mapping")
 
@@ -803,9 +918,23 @@ object XmpImport {
                 grainRough = grainRough,
                 vigMidpoint = vigMid,
                 vigFeather = vigFeather,
+                vigRound = vigRound,
+                vigAspect = vigAspect,
                 hsl = if (anyHsl) Hsl.encode(hsl) else Hsl.NONE,
                 grayscale = grayscale,
                 calibration = calibrationField,
+                vibrance = vibrance,
+                colorGrade = if (anyGrade) ColorGrade.encode(grade) else ColorGrade.NONE,
+                bwMix = if (anyBw) BwMix.encode(bw) else BwMix.NONE,
+                denoiseLum = denoiseLum,
+                denoiseColor = denoiseColor,
+                defringe = if (anyDef || lensCAFlag > 0f) Defringe.encode(def) else Defringe.NONE,
+                lensCA = lensCAFlag,
+                lensEnable = lensEnableFlag,
+                lensDistort = lensDistortVal,
+                lensBlur = 0f,
+                lensFocus = 0.5f,
+                geometry = if (anyGeo) Geometry.encode(geo) else Geometry.NONE,
                 splitAmount = splitAmount,
                 shadowTint = splitShadowTint,
                 highlightTint = splitHighlightTint,

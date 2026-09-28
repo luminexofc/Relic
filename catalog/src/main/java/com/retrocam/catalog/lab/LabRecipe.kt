@@ -165,6 +165,36 @@ data class LabRecipe(
      * [Calibration] for why this one really is a matrix.
      */
     val calibration: String = Calibration.NONE,
+
+    /** Vibrance, -1..1. Protects skin tones (low-sat boost). */
+    val vibrance: Float = 0f,
+
+    /** Color Grading 3-way, packed 8, or [ColorGrade.NONE]. */
+    val colorGrade: String = ColorGrade.NONE,
+
+    /** B&W mixer, packed 8, or [BwMix.NONE]. Only applies when grayscale on. */
+    val bwMix: String = BwMix.NONE,
+
+    /** Vignette roundness/aspect, 0..1 (0.5 neutral). */
+    val vigRound: Float = 0.5f,
+    val vigAspect: Float = 0.5f,
+
+    /** Noise reduction, 0..1. */
+    val denoiseLum: Float = 0f,
+    val denoiseColor: Float = 0f,
+
+    /** Defringe packed 6, or [Defringe.NONE]. */
+    val defringe: String = Defringe.NONE,
+
+    /** Optics toggles + manual lens controls. */
+    val lensCA: Float = 0f,
+    val lensEnable: Float = 0f,
+    val lensDistort: Float = 0f,
+    val lensBlur: Float = 0f,
+    val lensFocus: Float = 0.5f,
+
+    /** Geometry packed 8, or [Geometry.NONE]. */
+    val geometry: String = Geometry.NONE,
 ) {
     /** The parsed `(hue, saturation)` pair, or null when no calibration is set. */
     fun calibrationParts(): Pair<FloatArray, FloatArray>? = Calibration.parse(calibration)
@@ -203,11 +233,24 @@ data class LabRecipe(
     /** The template's 4x5 matrix, or null when there is no template. */
     fun templateMatrix(): FloatArray? = templateId?.let { LabTemplates.byId[it]?.matrix }
 
+    fun gradeArray(): FloatArray? = ColorGrade.parse(colorGrade)
+    val gradeActive: Boolean get() = ColorGrade.isActive(gradeArray())
+    fun bwArray(): FloatArray? = BwMix.parse(bwMix)
+    val bwActive: Boolean get() = BwMix.isActive(bwArray())
+    fun defringeArray(): FloatArray? = Defringe.parse(defringe)
+    val defringeActive: Boolean get() = Defringe.isActive(defringeArray()) || lensCA > 0.5f
+    fun geoArray(): FloatArray? = Geometry.parse(geometry)
+    val geoActive: Boolean get() = Geometry.isActive(geoArray())
+
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
         get() = templateId == null && adjustments.isNeutral && !hasEffects &&
             stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive &&
-            !hslActive && grayscale == 0f && !calibrationActive
+            !hslActive && grayscale == 0f && !calibrationActive &&
+            vibrance == 0f && !gradeActive && !bwActive &&
+            denoiseLum == 0f && denoiseColor == 0f && !defringeActive &&
+            lensEnable == 0f && lensDistort == 0f && lensBlur == 0f && !geoActive &&
+            vigRound == 0.5f && vigAspect == 0.5f
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -238,9 +281,18 @@ data class LabRecipe(
         if (detail != 0f) add("detail")
         if (masking != 0f) add("masking")
         if (vigMidpoint != 0.5f || vigFeather != 0.5f) add("vignette falloff")
+        if (vigRound != 0.5f || vigAspect != 0.5f) add("vignette shape")
         if (hslActive) add("color mixer")
         if (grayscale > 0f) add("grayscale")
+        if (bwActive) add("b&w mix")
         if (calibrationActive) add("calibration")
+        if (vibrance != 0f) add("vibrance")
+        if (gradeActive) add("color grade")
+        if (denoiseLum > 0f || denoiseColor > 0f) add("denoise")
+        if (defringeActive) add("defringe")
+        if (lensEnable > 0f || lensDistort != 0f) add("lens")
+        if (lensBlur > 0f) add("lens blur")
+        if (geoActive) add("geometry")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -319,6 +371,20 @@ data class LabRecipe(
             // field is normalised and clamped rather than passed to the GPU.
             calibration = r.calibrationParts()?.let { (h, s) -> Calibration.encode(h, s) }
                 ?: Calibration.NONE,
+            vibrance = r.vibrance.coerceIn(-1f, 1f),
+            colorGrade = r.gradeArray()?.let { ColorGrade.encode(it) } ?: ColorGrade.NONE,
+            bwMix = r.bwArray()?.let { BwMix.encode(it) } ?: BwMix.NONE,
+            vigRound = r.vigRound.coerceIn(0f, 1f),
+            vigAspect = r.vigAspect.coerceIn(0f, 1f),
+            denoiseLum = r.denoiseLum.coerceIn(0f, 1f),
+            denoiseColor = r.denoiseColor.coerceIn(0f, 1f),
+            defringe = r.defringeArray()?.let { Defringe.encode(it) } ?: Defringe.NONE,
+            lensCA = if (r.lensCA > 0.5f) 1f else 0f,
+            lensEnable = if (r.lensEnable > 0.5f) 1f else 0f,
+            lensDistort = r.lensDistort.coerceIn(-1f, 1f),
+            lensBlur = r.lensBlur.coerceIn(0f, 1f),
+            lensFocus = r.lensFocus.coerceIn(0f, 1f),
+            geometry = r.geoArray()?.let { Geometry.encode(it) } ?: Geometry.NONE,
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

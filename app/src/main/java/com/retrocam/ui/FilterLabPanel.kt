@@ -49,10 +49,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.retrocam.catalog.lab.BwMix
+import com.retrocam.catalog.lab.Calibration
+import com.retrocam.catalog.lab.ColorGrade
+import com.retrocam.catalog.lab.Defringe
+import com.retrocam.catalog.lab.Geometry
+import com.retrocam.catalog.lab.Hsl
 import com.retrocam.catalog.lab.LAB_EFFECTS
 import com.retrocam.catalog.lab.LAB_KNOB_GROUPS
 import com.retrocam.catalog.lab.LabKnob
+import com.retrocam.catalog.lab.ToneCurve
 import com.retrocam.catalog.lab.effectValue
+import com.retrocam.catalog.lab.hslBand
 import com.retrocam.catalog.lab.knobValue
 import com.retrocam.catalog.lab.withKnob
 import com.retrocam.catalog.lab.LabTemplates
@@ -88,6 +96,14 @@ fun FilterLabPanel(
     onKnob: (Int, Float) -> Unit,
     onResetKnob: (Int) -> Unit,
     onResetAll: () -> Unit,
+    onHsl: (Int, Int, Float) -> Unit,
+    onGrade: (Int, Float) -> Unit,
+    onBw: (Int, Float) -> Unit,
+    onCal: (Int, Float) -> Unit,
+    onDefringe: (Int, Float) -> Unit,
+    onGeoMode: (Int) -> Unit,
+    onParametric: (Int, Float) -> Unit,
+    onClearCurves: () -> Unit,
     onEffect: (Int, Float) -> Unit,
     onDuoColour: (Boolean, Int) -> Unit,
     luts: List<LutStore.Entry>,
@@ -232,6 +248,19 @@ fun FilterLabPanel(
                     }
                 }
             }
+            // Curves: parametric sliders rebuild the composite run (default
+            // splits), plus per-channel status + clear. Full spline editing is
+            // a whole screen; this is the control set presets actually use.
+            CurvesBlock(recipe, accent, dim, onParametric, onClearCurves)
+            // Color Mixer: 8 bands x H/S/L.
+            HslBlock(recipe, accent, dim, onHsl)
+            // Color Grading 3-way.
+            GradeBlock(recipe, accent, dim, onGrade)
+            // B&W mixer (only when grayscale on) + calibration + defringe + geometry mode.
+            BwBlock(recipe, accent, dim, onBw)
+            CalBlock(recipe, accent, dim, onCal)
+            DefringeBlock(recipe, accent, dim, onDefringe)
+            GeoBlock(recipe, accent, dim, onGeoMode, onKnob, onResetKnob)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 ShadcnButton(
                     text = "Reset all",
@@ -250,8 +279,11 @@ fun FilterLabPanel(
             }
 
             Spacer(Modifier.height(4.dp))
-            Text("EFFECTS", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-            LAB_EFFECTS.forEachIndexed { i, e ->
+            // VIGNETTE/GRAIN/SHARPEN now live in EFFECTS group above via LabKnob;
+            // only BLUR/GLITCH/DUOTONE remain here to avoid duplicate sliders.
+            Text("EFFECTS (STYLIZE)", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
+            listOf(3, 4, 5).forEach { i ->
+                val e = LAB_EFFECTS[i]
                 val v = recipe.effectValue(i)
                 LabSlider(
                     e.label, v, e.min, e.max, accent, dim,
@@ -967,6 +999,187 @@ private fun StageChain(
             ImportChip(p.displayName, dim) { onAdd(p.id) }
         }
     }
+}
+
+/** Collapsible section header, matching the knob-group style. */
+@Composable
+private fun SectionHeader(
+    title: String,
+    active: Boolean,
+    dim: androidx.compose.ui.graphics.Color,
+    onToggle: () -> Unit,
+    open: Boolean,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(top = 8.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title, fontFamily = AppType.Sans, fontSize = 10.sp,
+            color = if (active) dim else dim.copy(alpha = 0.55f),
+            modifier = Modifier.weight(1f),
+        )
+        Text(if (open) "HIDE" else "SHOW", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+    }
+}
+
+@Composable
+private fun CurvesBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onParametric: (Int, Float) -> Unit,
+    onClear: () -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.toneCurveActive) }
+    val group = remember(recipe.toneCurves) { ToneCurve.parseGroup(recipe.toneCurves) }
+    val active = recipe.toneCurveActive
+    SectionHeader("CURVES", active, dim, { open = !open }, open)
+    if (!open) return
+    val names = listOf("Composite", "Red", "Green", "Blue")
+    group.forEachIndexed { i, ch ->
+        Text(
+            "${names[i]}: ${if (ch == null) "linear" else "curved"}",
+            fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+        )
+    }
+    var pars by remember { mutableStateOf(floatArrayOf(0f, 0f, 0f, 0f)) }
+    listOf("PAR SHADOWS", "PAR DARKS", "PAR LIGHTS", "PAR HIGHLIGHTS").forEachIndexed { i, label ->
+        LabSlider(label, pars[i], -1f, 1f, accent, dim, {
+            val cur = pars.copyOf(); cur[i] = it; pars = cur; onParametric(i, it)
+        }, neutral = 0f, onReset = { val cur = pars.copyOf(); cur[i] = 0f; pars = cur; onParametric(i, 0f) })
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ShadcnButton(text = "Clear curves", onClick = onClear, variant = ButtonVariant.Ghost, size = ButtonSize.Sm)
+    }
+}
+
+@Composable
+private fun HslBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onHsl: (Int, Int, Float) -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.hslActive) }
+    SectionHeader("COLOR MIX (${if (recipe.hslActive) "on" else "off"})", recipe.hslActive, dim, { open = !open }, open)
+    if (!open) return
+    Hsl.BAND_NAMES.forEachIndexed { b, name ->
+        Text(name, fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+        listOf("HUE" to 0, "SAT" to 1, "LUM" to 2).forEach { (label, ch) ->
+            LabSlider("$name $label", recipe.hslBand(b, ch), -1f, 1f, accent, dim, { onHsl(b, ch, it) }, neutral = 0f,
+                onReset = { onHsl(b, ch, 0f) })
+        }
+    }
+}
+
+@Composable
+private fun GradeBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onGrade: (Int, Float) -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.gradeActive) }
+    SectionHeader("COLOR GRADING", recipe.gradeActive, dim, { open = !open }, open)
+    if (!open) return
+    val g = remember(recipe.colorGrade) { recipe.gradeArray() ?: ColorGrade.defaults() }
+    val names = listOf("SH HUE", "SH SAT", "MID HUE", "MID SAT", "HI HUE", "HI SAT", "BLEND", "BALANCE")
+    names.forEachIndexed { i, label ->
+        val range = when (i) { 7 -> -1f to 1f; else -> 0f to 1f }
+        val neutral = if (i == 6) 0.5f else 0f
+        LabSlider(label, g[i], range.first, range.second, accent, dim, { onGrade(i, it) }, neutral = neutral,
+            onReset = { onGrade(i, neutral) })
+    }
+}
+
+@Composable
+private fun BwBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onBw: (Int, Float) -> Unit,
+) {
+    if (recipe.grayscale <= 0f) return
+    var open by remember { mutableStateOf(recipe.bwActive) }
+    SectionHeader("B&W MIX", recipe.bwActive, dim, { open = !open }, open)
+    if (!open) return
+    val cur = remember(recipe.bwMix) { recipe.bwArray() ?: FloatArray(BwMix.VALUES) }
+    Hsl.BAND_NAMES.forEachIndexed { b, name ->
+        LabSlider(name, cur[b], -1f, 1f, accent, dim, { onBw(b, it) }, neutral = 0f, onReset = { onBw(b, 0f) })
+    }
+}
+
+@Composable
+private fun CalBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onCal: (Int, Float) -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.calibrationActive) }
+    SectionHeader("CALIBRATION", recipe.calibrationActive, dim, { open = !open }, open)
+    if (!open) return
+    val parts = remember(recipe.calibration) { recipe.calibrationParts() }
+    val h = parts?.first ?: FloatArray(3); val s = parts?.second ?: FloatArray(3)
+    listOf("RED HUE" to h[0], "RED SAT" to s[0], "GREEN HUE" to h[1], "GREEN SAT" to s[1], "BLUE HUE" to h[2], "BLUE SAT" to s[2]).forEachIndexed { i, (label, v) ->
+        LabSlider(label, v, -1f, 1f, accent, dim, { onCal(i, it) }, neutral = 0f, onReset = { onCal(i, 0f) })
+    }
+}
+
+@Composable
+private fun DefringeBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onDefringe: (Int, Float) -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.defringeActive) }
+    SectionHeader("DEFRINGE", recipe.defringeActive, dim, { open = !open }, open)
+    if (!open) return
+    val cur = remember(recipe.defringe) { recipe.defringeArray() ?: Defringe.defaults() }
+    val labels = listOf("PURPLE AMT", "PURPLE LO", "PURPLE HI", "GREEN AMT", "GREEN LO", "GREEN HI")
+    labels.forEachIndexed { i, label ->
+        LabSlider(label, cur[i], 0f, 1f, accent, dim, { onDefringe(i, it) }, neutral = Defringe.defaults()[i],
+            onReset = { onDefringe(i, Defringe.defaults()[i]) })
+    }
+}
+
+@Composable
+private fun GeoBlock(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onGeoMode: (Int) -> Unit,
+    onKnob: (Int, Float) -> Unit,
+    onResetKnob: (Int) -> Unit,
+) {
+    var open by remember { mutableStateOf(recipe.geoActive) }
+    SectionHeader("GEOMETRY", recipe.geoActive, dim, { open = !open }, open)
+    if (!open) return
+    val cur = remember(recipe.geometry) { recipe.geoArray() ?: Geometry.defaults() }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Geometry.MODE_NAMES.forEachIndexed { i, m ->
+            val sel = cur[0].toInt() == i
+            Box(
+                Modifier.background(if (sel) accent else MaterialTheme.colorScheme.surface, RoundedCornerShape(50))
+                    .clickable { onGeoMode(i) }.padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Text(m, fontFamily = AppType.Sans, fontSize = 9.sp,
+                    color = if (sel) androidx.compose.ui.graphics.Color.Black else MaterialTheme.colorScheme.onBackground)
+            }
+        }
+    }
+    // Auto/Guided/Level are presets (no scene analysis); manual sliders below.
+    listOf("GEO VERTICAL", "GEO HORIZONTAL", "GEO ROTATE", "GEO ASPECT", "GEO SCALE", "GEO X", "GEO Y").forEach { label ->
+        val k = LabKnob.byLabel(label) ?: return@forEach
+        val i = LabKnob.entries.indexOf(k)
+        val range = when (label) { "GEO SCALE" -> 0f to 1f; else -> -1f to 1f }
+        LabSlider(label, recipe.knobValue(k), range.first, range.second, accent, dim, { onKnob(i, it) },
+            neutral = 0f, onReset = { onResetKnob(i) })
+    }
+    Text("Auto levels tilt, Guided sets manual lines (sliders), Full corrects both axes.",
+        fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
 }
 
 /**

@@ -100,8 +100,9 @@ class XmpImportTest {
     fun `contrast and saturation land on their own knobs`() {
         val r = XmpImport.parse(modern).recipe.adjustments
         assertEquals(1.1f, r.contrast, 1e-3f)
-        // Saturation -5 and Vibrance +20 multiply: 0.95 * 1.2 = 1.14
-        assertEquals(1.14f, r.saturation, 1e-3f)
+        // Saturation and Vibrance are separate controls now: saturation stands
+        // alone, vibrance rides alongside it.
+        assertEquals(0.95f, r.saturation, 1e-3f)
     }
 
     @Test
@@ -222,10 +223,12 @@ class XmpImportTest {
     fun `approximate mappings are flagged as such`() {
         val res = XmpImport.parse(modern)
         val approx = res.applied.filter { it.approx }.map { it.key }.toSet()
-        // Exposure, Vibrance and ColorTemp are the lossy ones.
+        // Exposure and ColorTemp are the lossy ones (stops->gamma, Kelvin->opinion).
         assertTrue(approx.contains("Exposure2012"))
-        assertTrue(approx.contains("Vibrance"))
         assertTrue(approx.contains("ColorTemp"))
+        // Vibrance is exact now: it has its own control rather than folding
+        // into saturation.
+        assertTrue(!res.applied.first { it.key == "Vibrance" }.approx)
         // These are exact, so claiming otherwise would be its own kind of lie.
         assertTrue(!res.applied.first { it.key == "Contrast2012" }.approx)
         assertTrue(!res.applied.first { it.key == "Tint" }.approx)
@@ -235,15 +238,13 @@ class XmpImportTest {
     fun `the keys with no Lab equivalent are reported, not vanished`() {
         val res = XmpImport.parse(modern)
         val dropped = res.ignored.map { it.key }.toSet()
-        // The only keys with no Lab equivalent left: Adobe's proprietary curve
-        // sets, and the two vignette shape parameters. GrainAmount now maps, and
-        // does, because the grain got real size and roughness parameters.
-        // ToneCurveName is metadata, not a look setting, so it is deliberately
-        // absent from the report rather than listed as dropped.
-        for (k in listOf(
-            "Look", "PostCropVignetteRoundness", "PostCropVignetteAspect",
-        )) {
-            assertTrue("$k was dropped without being reported", k in dropped)
+        // The only key with no Lab equivalent left in this fixture is Adobe's
+        // proprietary curve set. The vignette shape parameters are real controls
+        // now, and ToneCurveName is metadata, deliberately absent rather than
+        // listed as dropped.
+        assertTrue("Look was dropped without being reported", "Look" in dropped)
+        for (k in listOf("PostCropVignetteRoundness", "PostCropVignetteAspect")) {
+            assertTrue("$k should be applied now, not dropped", res.applied.any { it.key == k })
         }
         assertTrue(
             "GrainAmount should be applied now, not dropped",
@@ -758,17 +759,20 @@ class XmpImportTest {
             crs:HasSettings="True" crs:Name="my preset"
             """.trimIndent(),
         )
-        // Everything above that is a look setting, we handle. Everything above
-        // that is not, is out of the denominator.
+        // Optics and geometry are real controls now, so AutoLateralCA,
+        // PerspectiveVertical and LensProfileEnable are look settings and
+        // applied. The rest is still out of the denominator.
         assertEquals(0, res.ignored.size)
         assertEquals(100, res.coveragePercent)
-        // And the non-look keys are still visible, not vanished.
         assertTrue(res.metadata.isNotEmpty())
-        for (k in listOf("Copyright", "PresetType", "PerspectiveVertical", "Name")) {
+        for (k in listOf("Copyright", "PresetType", "Name")) {
             assertTrue("$k should be listed as not-a-look", res.metadata.any { it.key == k })
         }
-        // 15 of the file's keys are look settings, and we handle all 15.
-        assertEquals(15, res.lookKeys.size)
+        for (k in listOf("AutoLateralCA", "PerspectiveVertical", "LensProfileEnable")) {
+            assertTrue("$k should be applied now", res.applied.any { it.key == k })
+        }
+        // 18 of the file's keys are look settings, and we handle all 18.
+        assertEquals(18, res.lookKeys.size)
     }
 
     /**

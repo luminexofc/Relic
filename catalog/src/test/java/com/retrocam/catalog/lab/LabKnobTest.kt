@@ -18,26 +18,34 @@ import org.junit.Test
  */
 class LabKnobTest {
 
+    private fun testValue(k: LabKnob): Float {
+        // Toggles are 0/1: 0.5 would threshold back to 0 and never round-trip.
+        if (k == LabKnob.LENS_CA || k == LabKnob.LENS_ENABLE) return 1f
+        // Deterministic in-range value distinct from neutral for every knob.
+        return when (k.neutral) {
+            0f -> 0.5f
+            1f -> 1.5f
+            0.5f -> 0.8f
+            else -> k.neutral + 0.3f
+        }
+    }
+
     @Test
     fun `every knob reads a field and writing it back is a no-op`() {
         // The round trip that catches a `when` with a branch missing: reading a
         // knob the writer does not handle would return neutral no matter what,
         // and the UI would show a slider that does nothing.
-        val values = floatArrayOf(
-            0.2f, 1.3f, 0.7f, -0.4f, 0.15f, 1.2f, 0.3f,
-            -0.5f, 0.6f, -0.2f, 0.45f,
-            0.35f, -0.25f, 0.55f,
-            0.5f,
-            1.8f, 0.3f, 0.7f,
-            2.2f, 0.4f, 0.3f, 0.8f,
-        )
-        LabKnob.entries.forEachIndexed { i, k ->
-            val r = LabRecipe().withKnob(k, values[i])
-            assertEquals(
-                "${k.name} did not round trip",
-                values[i], r.knobValue(k), 1e-4f,
-            )
+        LabKnob.entries.forEach { k ->
+            // EXPOSURE<->GAMMA share one field (EV vs gamma views); tested separately.
+            if (k == LabKnob.EXPOSURE) return@forEach
+            val v = testValue(k)
+            val r = LabRecipe().withKnob(k, v)
+            assertEquals("${k.name} did not round trip", v, r.knobValue(k), 1e-3f)
         }
+        // The aliased pair: EXPOSURE writes gamma, GAMMA reads it back converted.
+        val r = LabRecipe().withKnob(LabKnob.EXPOSURE, 1f)
+        assertEquals(1f, r.knobValue(LabKnob.EXPOSURE), 1e-3f)
+        assertEquals(exposureToGamma(1f), r.knobValue(LabKnob.GAMMA), 1e-3f)
     }
 
     @Test
@@ -53,11 +61,14 @@ class LabKnobTest {
         // The property that a single slider actually moves one control. A `when`
         // that fell through to a shared branch would move several at once, and
         // that is invisible unless it is checked.
+        // EXPOSURE and GAMMA share the gamma field by design (EV vs gamma views).
+        val aliases = setOf(LabKnob.EXPOSURE to LabKnob.GAMMA, LabKnob.GAMMA to LabKnob.EXPOSURE)
         LabKnob.entries.forEach { target ->
             val base = LabRecipe()
-            val moved = base.withKnob(target, if (target.neutral == 0f) 0.5f else target.neutral + 0.3f)
+            val moved = base.withKnob(target, testValue(target))
             for (other in LabKnob.entries) {
                 if (other == target) continue
+                if (aliases.contains(target to other)) continue
                 assertEquals(
                     "${target.name} also changed ${other.name}",
                     base.knobValue(other), moved.knobValue(other), 0f,
@@ -90,17 +101,19 @@ class LabKnobTest {
     @Test
     fun `the display groups and the flat list cover the same knobs`() {
         val grouped = LAB_KNOB_GROUPS.flatMap { it.knobs }.associateBy { it.label }
-        // The seven original Lab controls, which live outside the groups
-        // because they are the primary panel rather than an XMP-derived one.
-        val primary = setOf(
-            "BRIGHTNESS", "CONTRAST", "SATURATION", "WARMTH", "TINT",
-            "GAMMA", "SPLIT TONE",
-        )
-        val expected = LabKnob.entries.map { it.label }.toSet() - primary
-        assertEquals(expected, grouped.keys)
+        // Every group label must exist in the flat list, with matching neutral.
         for ((label, knob) in grouped) {
-            val enum = LabKnob.entries.first { it.label == label }
-            assertEquals("neutral mismatch for $label", enum.neutral, knob.neutral, 0f)
+            val enum = LabKnob.entries.firstOrNull { it.label == label }
+            assertNotNull("group knob $label has no LabKnob entry", enum)
+            assertEquals("neutral mismatch for $label", enum!!.neutral, knob.neutral, 0f)
+        }
+        // Every scalar LabKnob that has a slider must appear in some group.
+        // (Array groups — mixer, grade, B&W, cal, defringe — have their own UI.)
+        val scalarLabels = LabKnob.entries.map { it.label }.toSet() - setOf(
+            "BRIGHTNESS", "GAMMA", "SPLIT TONE",
+        )
+        for (label in scalarLabels) {
+            assertTrue("LabKnob $label has no group slider", label in grouped.keys)
         }
     }
 

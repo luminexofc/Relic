@@ -663,6 +663,38 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    fun setHslBand(band: Int, ch: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withHsl(band, ch, value)) }
+    }
+    fun setGrade(slot: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withGrade(slot, value)) }
+    }
+    fun setBw(band: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withBw(band, value)) }
+    }
+    fun setCal(slot: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withCal(slot, value)) }
+    }
+    fun setDefringe(slot: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.withDefringe(slot, value)) }
+    }
+    fun setGeoMode(mode: Int) {
+        pendingSelectedRecipe = null
+        _uiState.update { s ->
+            val cur = s.labRecipe.geoArray() ?: com.retrocam.catalog.lab.Geometry.defaults()
+            val next = cur.copyOf(); next[0] = mode.coerceIn(0, 5).toFloat()
+            // Level zeroes tilt; Vertical zeroes horizontal; Full keeps both.
+            if (mode == 3) { next[1] = 0f; next[2] = 0f }
+            if (mode == 4) { next[2] = 0f }
+            s.copy(labRecipe = s.labRecipe.copy(geometry = com.retrocam.catalog.lab.Geometry.encode(next)))
+        }
+    }
+
     /** Updates one effect amount. [which] indexes [com.retrocam.catalog.lab.LAB_EFFECTS]. */
     fun setLabEffect(which: Int, value: Float) {
         pendingSelectedRecipe = null
@@ -952,8 +984,48 @@ class CameraViewModel @Inject constructor(
     }
 
     fun resetLabKnobs() {
-        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(adjustments = com.retrocam.catalog.lab.LabAdjustments.NEUTRAL)) }
+        _uiState.update { s ->
+            var r = s.labRecipe
+            for (k in com.retrocam.catalog.lab.LabKnob.entries) r = r.withKnob(k, k.neutral)
+            r = r.copy(
+                hsl = com.retrocam.catalog.lab.Hsl.NONE,
+                calibration = com.retrocam.catalog.lab.Calibration.NONE,
+                colorGrade = com.retrocam.catalog.lab.ColorGrade.NONE,
+                bwMix = com.retrocam.catalog.lab.BwMix.NONE,
+                defringe = com.retrocam.catalog.lab.Defringe.NONE,
+                geometry = com.retrocam.catalog.lab.Geometry.NONE,
+            )
+            s.copy(labRecipe = r)
+        }
     }
+
+    fun clearLabCurves() {
+        pendingSelectedRecipe = null
+        _uiState.update { s -> s.copy(labRecipe = s.labRecipe.copy(toneCurves = com.retrocam.catalog.lab.ToneCurve.NONE)) }
+    }
+
+    /** Parametric slider -> rebuild composite curve (default splits 25/50/75). */
+    fun setLabParametric(slot: Int, value: Float) {
+        pendingSelectedRecipe = null
+        _uiState.update { s ->
+            val cur = s.labRecipe
+            // Read current parametric amounts back from UI state is impossible here,
+            // so fold single-slot delta onto existing composite: decode composite,
+            // adjust by value, re-encode. Simpler and stable: build from value alone
+            // with other slots at 0 would erase. Instead keep a session cache.
+            val amounts = parametricCache.sliceArray(0 until 4)
+            amounts[slot.coerceIn(0, 3)] = (value * 100f).coerceIn(-100f, 100f)
+            for (i in 0 until 4) parametricCache[i] = amounts[i]
+            val comp = com.retrocam.catalog.lab.ToneCurve.foldParametric(
+                amounts[0], amounts[1], amounts[2], amounts[3], 25f, 50f, 75f,
+            )
+            val group = com.retrocam.catalog.lab.ToneCurve.parseGroup(cur.toneCurves)
+            val next = listOf(comp, group.getOrNull(1), group.getOrNull(2), group.getOrNull(3))
+            s.copy(labRecipe = cur.copy(toneCurves = com.retrocam.catalog.lab.ToneCurve.encodeGroup(next)))
+        }
+    }
+
+    private val parametricCache = floatArrayOf(0f, 0f, 0f, 0f)
 
     /** True when there is anything worth saving. */
     fun canSaveLab(): Boolean = !_uiState.value.labRecipe.isIdentity

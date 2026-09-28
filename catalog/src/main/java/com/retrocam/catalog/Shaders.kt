@@ -104,6 +104,43 @@ object Shaders {
         uniform float u_gScale;       // tint
         uniform float u_bScale;       // warmth
         uniform float u_saturation;
+        /** Vibrance, -1..1. Low-sat boost that protects skin tones. */
+        uniform float u_vibrance;
+
+        /** Color Grading 3-way: (shHue,shSat,midHue,midSat) + (hiHue,hiSat,blend,balance). */
+        uniform vec4 u_gradeA;
+        uniform vec4 u_gradeB;
+        uniform float u_gradeActive;
+
+        /** B&W mixer, 8 bands. Only applies when u_grayscale is on. */
+        uniform vec4 u_bwMixA;
+        uniform vec4 u_bwMixB;
+        uniform float u_bwActive;
+
+        /** Vignette shape. 0.5 neutral for both. */
+        uniform float u_vigRound;
+        uniform float u_vigAspect;
+
+        /** Noise reduction, 0..1 each. Shares one 9-tap blur. */
+        uniform float u_nrLum;
+        uniform float u_nrColor;
+
+        /** Defringe: (purpleAmt,purpleLo,purpleHi,greenAmt) + (greenLo,greenHi) + active flag. */
+        uniform vec4 u_defringeA;
+        uniform vec4 u_defringeB;
+        uniform float u_defringeActive;
+
+        /** Optics: CA toggle, lens enable, manual distort, lens blur + focus. */
+        uniform float u_lensCA;
+        uniform float u_lensEnable;
+        uniform float u_lensDistort;
+        uniform float u_lensBlur;
+        uniform float u_lensFocus;
+
+        /** Geometry: (mode,vert,horiz,rotate) + (aspect,scale,x,y) + active. */
+        uniform vec4 u_geoA;
+        uniform vec4 u_geoB;
+        uniform float u_geoActive;
 
         // Adobe's 1D tone curve: a 256x1 texture holding four curves in its
         // channels, R composite, G red, B green, A blue. Any channel the preset
@@ -226,6 +263,59 @@ object Shaders {
                 hsl.y * (1.0 + adj.y),
                 hsl.z * (1.0 + adj.z)
             ));
+        }
+
+        // B&W band weight: same centres as the mixer, so the mixer UI teaches
+        // the B&W UI for free.
+        float bwWeight(float hueDeg, int band) { return hslWeight(hueDeg, band); }
+
+        // Hue inside [lo,hi] in turns (0..1, wraps). For defringe ranges.
+        float hueInRange(float h, float lo, float hi) {
+            if (lo <= hi) return step(lo, h) * (1.0 - step(hi, h));
+            return step(lo, h) + (1.0 - step(hi, h));
+        }
+
+        // Geometry warp on frame coords. Mode selects which corrections apply;
+        // sliders are manual in every mode (Auto/Guided/Level are presets that
+        // set them, no scene analysis on device).
+        vec2 geoWarp(vec2 uv, vec4 A, vec4 B) {
+            float mode = A.x;
+            float vert = A.y;
+            float horiz = A.z;
+            float rot = A.w; // -1..1 maps to -30..30deg
+            float aspect = B.x; // -1..1 maps to 0.5..2
+            float scale = B.y; // 0..1 maps to 0.5..1.5
+            float ox = B.z;
+            float oy = B.w;
+            vec2 p = uv - 0.5;
+            // Aspect + rotate + scale around centre.
+            float aScale = 1.0 + aspect * 0.75;
+            p.x *= aScale;
+            float ang = rot * 0.5236;
+            float ca = cos(ang);
+            float sa = sin(ang);
+            p = mat2(ca, -sa, sa, ca) * p;
+            float sc = 0.5 + scale;
+            // Vertical mode corrects vertical keystone only; Full both axes.
+            float vv = vert;
+            float hh = horiz;
+            if (mode < 3.5 && mode > 0.5) {
+                // Auto/Guided/Level: apply as stored (presets set them).
+            }
+            if (abs(mode - 4.0) < 0.5) { hh = 0.0; }
+            // Keystone as division (perspective, not affine).
+            float w = 1.0 + vv * p.y * 1.5 + hh * p.x * 1.5;
+            w = max(w, 0.2);
+            p = p / w;
+            p = p / max(sc, 0.2) + vec2(ox * 0.5, oy * 0.5);
+            return p + 0.5;
+        }
+
+        // Barrel/pincushion distortion around centre. d -1..1.
+        vec2 lensDistort(vec2 uv, float d) {
+            vec2 p = uv - 0.5;
+            float r2 = dot(p, p);
+            return uv + p * r2 * d * 2.0;
         }
 
         uniform float u_gamma;
@@ -1133,10 +1223,24 @@ object Shaders {
             // for the convolutions and the channel split.
             vec2 texel = 1.0 / max(u_resolution, vec2(1.0));
 
+            // --- 0. Geometry + lens distortion warp (coordinate, not colour).
+            // Warps where we sample from, before anything else. No fetches by
+            // itself, just ALU to compute the warped coord + one resample.
+            vec2 geoUv = uv;
+            if (u_geoActive > 0.0) {
+                geoUv = geoWarp(uv, u_geoA, u_geoB);
+            }
+            if (u_lensEnable > 0.5 && abs(u_lensDistort) > 0.001) {
+                geoUv = lensDistort(geoUv, u_lensDistort);
+            }
             // The working colour for the whole body. Every stage below reads and
             // writes this, so it is declared once here rather than next to
             // whichever stage happened to come first.
             vec3 c = src.rgb;
+            if (u_geoActive > 0.0 || (u_lensEnable > 0.5 && abs(u_lensDistort) > 0.001)) {
+                vec2 clampedUv = clamp(geoUv, 0.0, 1.0);
+                c = sampleSrc(clampedUv).rgb;
+            }
 
             // --- 1. the template, a whole base look, applied ahead of the
             // adjustments because it is not itself an adjustment ---
@@ -1232,19 +1336,41 @@ object Shaders {
                 );
             }
 
-            // --- 7. Vibrance and Saturation. This is exactly
-            // LabGrading.saturationMatrix, since both are built from the same
-            // luminance weights: out = lum + s*(in - lum). ---
+            // --- 7. Vibrance then Saturation. Vibrance boosts low-sat pixels
+            // more (skin-tone protection); saturation is uniform.
+            if (abs(u_vibrance) > 0.001) {
+                float lum = luminance(c);
+                float satM = clamp(distance(c, vec3(lum)) * 2.0, 0.0, 1.0);
+                float k = 1.0 + u_vibrance * (1.0 - satM);
+                c = mix(vec3(lum), c, k);
+            }
             if (abs(u_saturation - 1.0) > 0.001) {
                 float lum = luminance(c);
                 c = mix(vec3(lum), c, u_saturation);
             }
 
-            // --- 8. Grayscale, the last of Adobe's colour controls. After
-            // saturation, so a preset that sets both gets the switch as the
-            // final word, which is what ConvertToGrayscale means. ---
+            // --- 8. Grayscale + B&W mixer. Mixer only applies when grayscale on.
             if (u_grayscale > 0.0) {
-                c = mix(c, vec3(luminance(c)), u_grayscale);
+                float lum = luminance(c);
+                float gray = lum;
+                if (u_bwActive > 0.0) {
+                    vec3 hsl = rgbToHsl(c);
+                    float total = 0.0;
+                    float adj = 0.0;
+                    for (int i = 0; i < 4; i++) {
+                        float w = hslWeight(hsl.x, i);
+                        float m = i < 2 ? (i == 0 ? u_bwMixA.x : u_bwMixA.y) : (i == 2 ? u_bwMixA.z : u_bwMixA.w);
+                        adj += w * m; total += w;
+                    }
+                    for (int i = 4; i < 8; i++) {
+                        float w = hslWeight(hsl.x, i);
+                        float m = i == 4 ? u_bwMixB.x : (i == 5 ? u_bwMixB.y : (i == 6 ? u_bwMixB.z : u_bwMixB.w));
+                        adj += w * m; total += w;
+                    }
+                    if (total > 0.0) adj /= total;
+                    gray = clamp(lum + adj * 0.25, 0.0, 1.0);
+                }
+                c = mix(c, vec3(gray), u_grayscale);
             }
 
             // --- 9. Tone Curve, then Look. Fourteen in Adobe's order, and the
@@ -1274,6 +1400,26 @@ object Shaders {
             // the mixer pays nothing for it.
             if (u_hslActive > 0.0) {
                 c = clamp(hslBands(c, u_hsl), 0.0, 1.0);
+            }
+
+            // --- 10b. Color Grading 3-way. After mixer, before LUT. Three tints
+            // from HSL->RGB, weighted by luminance zones with blend smoothing.
+            if (u_gradeActive > 0.0) {
+                float l = luminance(c);
+                vec3 shTint = hslToRgb(vec3(u_gradeA.x * 360.0, u_gradeA.y, 0.5));
+                vec3 midTint = hslToRgb(vec3(u_gradeA.z * 360.0, u_gradeA.w, 0.5));
+                vec3 hiTint = hslToRgb(vec3(u_gradeB.x * 360.0, u_gradeB.y, 0.5));
+                float blend = u_gradeB.z;
+                float bal = u_gradeB.w;
+                float wSh = 1.0 - smoothstep(0.0, 0.4 + blend * 0.4, l);
+                float wHi = smoothstep(0.6 - blend * 0.4, 1.0, l);
+                float wMid = clamp(1.0 - wSh - wHi, 0.0, 1.0);
+                // Balance shifts mid weight toward shadows/highlights.
+                wSh = clamp(wSh + bal * 0.3 * wMid, 0.0, 1.0);
+                wHi = clamp(wHi - bal * 0.3 * wMid, 0.0, 1.0);
+                vec3 tint = shTint * wSh + midTint * wMid + hiTint * wHi;
+                tint = tint / max(wSh + wMid + wHi, 0.001);
+                c = mix(c, c * (tint * 2.0), clamp(wSh * u_gradeA.y + wMid * u_gradeA.w + wHi * u_gradeB.y, 0.0, 1.0));
             }
 
             // --- 3D LUT (Hald CLUT) ---
@@ -1341,6 +1487,44 @@ object Shaders {
                 }
             }
 
+            // --- denoise: luminance + color, shared one 9-tap blur. Lum smooths
+            // flat areas (edge-masked); color smooths chroma, preserves luma.
+            if (u_nrLum > 0.0 || u_nrColor > 0.0) {
+                vec3 nb = tent3(c, texel * 2.0);
+                if (u_nrLum > 0.0) {
+                    float e0 = luminance(c);
+                    float e1 = luminance(tent3(c, texel * 1.0));
+                    float edge = clamp(abs(e0 - e1) * 8.0, 0.0, 1.0);
+                    float k = u_nrLum * (1.0 - edge);
+                    c = mix(c, vec3(luminance(nb)), k * 0.8);
+                }
+                if (u_nrColor > 0.0) {
+                    float lum = luminance(c);
+                    float blum = luminance(nb);
+                    vec3 chroma = c - vec3(lum);
+                    vec3 bchroma = nb - vec3(blum);
+                    c = vec3(lum) + mix(chroma, bchroma, u_nrColor);
+                }
+            }
+
+            // --- defringe: hue-masked desat for purple + green fringes.
+            if (u_defringeActive > 0.0) {
+                vec3 hsl = rgbToHsl(c);
+                float h = hsl.x / 360.0;
+                float s = hsl.y;
+                float purpleM = hueInRange(h, u_defringeA.y, u_defringeA.z) * u_defringeA.x;
+                float greenM = hueInRange(h, u_defringeB.x, u_defringeB.y) * u_defringeA.w;
+                // Auto CA uses moderate defaults when manual amounts are zero.
+                if (u_lensCA > 0.5) {
+                    float autoP = hueInRange(h, 0.75, 0.92) * 0.5;
+                    float autoG = hueInRange(h, 0.25, 0.42) * 0.5;
+                    purpleM = max(purpleM, autoP);
+                    greenM = max(greenM, autoG);
+                }
+                float k = clamp(purpleM + greenM, 0.0, 1.0) * step(0.1, s);
+                c = mix(c, vec3(luminance(c)), k);
+            }
+
             // --- blur: 3x3 tent at widening spacing (see LabUniforms.BLUR_MAX_SPACING_PX) ---
             if (u_blur > 0.0) {
                 vec2 s = texel * (1.0 + u_blur * 6.0);
@@ -1357,6 +1541,25 @@ object Shaders {
                 c = mix(c, sum / 16.0, u_blur);
             }
 
+            // --- lens blur: synthetic depth blur, radial mask from focus.
+            if (u_lensBlur > 0.0) {
+                vec2 s = texel * (2.0 + u_lensBlur * 10.0);
+                vec3 sum = vec3(0.0);
+                sum += sampleSrc(uv + vec2(-s.x, -s.y)).rgb;
+                sum += sampleSrc(uv + vec2(0.0, -s.y)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2(s.x, -s.y)).rgb;
+                sum += sampleSrc(uv + vec2(-s.x, 0.0)).rgb * 2.0;
+                sum += c * 4.0;
+                sum += sampleSrc(uv + vec2(s.x, 0.0)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2(-s.x, s.y)).rgb;
+                sum += sampleSrc(uv + vec2(0.0, s.y)).rgb * 2.0;
+                sum += sampleSrc(uv + vec2(s.x, s.y)).rgb;
+                vec3 blurred = sum / 16.0;
+                float dFocus = abs(luminance(c) - u_lensFocus);
+                float m = clamp(dFocus * 2.0, 0.0, 1.0) * u_lensBlur;
+                c = mix(c, blurred, m * 0.8);
+            }
+
             // --- rgb split: red left, green centred, blue right ---
             if (u_glitch > 0.0) {
                 vec2 g = vec2(max(1.0 / u_resolution.x, 0.0015) * u_glitch * 10.0, 0.0);
@@ -1371,20 +1574,27 @@ object Shaders {
                 c = mix(c, duo, u_duotone);
             }
 
-            // --- vignette: quadratic falloff, normalised so the corner is darkest ---
+            // --- vignette: falloff with roundness + aspect shape controls.
             if (u_vignette > 0.0) {
                 float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+                aspect *= 0.5 + u_vigAspect;
                 vec2 d = uv - 0.5;
                 d.x *= aspect;
-                float nd = length(d) / length(vec2(0.5 * aspect, 0.5));
-                // Midpoint moves where the falloff starts and feather widens the
-                // transition, so a hard vignette and a soft one are reachable
-                // from the same falloff. Roundness and Aspect are not implemented;
-                // see the recipe field.
+                float circ = length(d) / length(vec2(0.5 * aspect, 0.5));
+                float rect = max(abs(d.x) / (0.5 * aspect), abs(d.y) / 0.5);
+                float nd = mix(circ, rect, u_vigRound);
                 float start = mix(0.15, 0.95, u_vigMid);
                 float width = mix(0.02, 0.6, u_vigFeather);
                 float f = smoothstep(start, start + width, clamp(nd, 0.0, 1.2));
                 c *= 1.0 - u_vignette * f;
+            }
+            // Lens vignette correction (brighten corners) when enabled.
+            if (u_lensEnable > 0.5) {
+                float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+                vec2 d = uv - 0.5;
+                d.x *= aspect;
+                float nd = clamp(length(d) / length(vec2(0.5 * aspect, 0.5)), 0.0, 1.0);
+                c *= 1.0 + nd * nd * 0.15;
             }
 
             // --- grain ---

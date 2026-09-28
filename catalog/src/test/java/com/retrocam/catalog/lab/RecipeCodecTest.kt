@@ -33,7 +33,7 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "11",
+        version: String = "12",
         name: String = "X",
         base: String = "original",
         template: String = "-",
@@ -51,8 +51,9 @@ class RecipeCodecTest {
         ops: List<String> = listOf("1", "0", "0", "1", "0.5", "0.5", "0.5"),
         mixer: List<String> = listOf("-", "0"),
         calibration: String = "-",
+        extra: List<String> = listOf("0", "-", "-", "0.5", "0.5", "0", "0", "-", "0", "0", "0", "0", "0.5", "-"),
     ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut +
-        colour + stamp + reserved + stages + curves + ranges + local + ops + mixer + calibration)
+        colour + stamp + reserved + stages + curves + ranges + local + ops + mixer + calibration + extra)
         .joinToString(",")
 
     @Test
@@ -79,7 +80,7 @@ class RecipeCodecTest {
         // length, which is what catches a payload() helper that fell behind.
         assertEquals(built, payload().split(',').size, "payload() is out of step with encode()")
         // If these ever disagree the app is unreadable, so pin the number too.
-        assertEquals(50, built, "field count changed; bump FIELD_COUNT and this test")
+        assertEquals(64, built, "field count changed; bump FIELD_COUNT and this test")
     }
 
     /**
@@ -122,6 +123,14 @@ class RecipeCodecTest {
             vigMidpoint = 0.2f, vigFeather = 0.7f,
             hsl = Hsl.encode(FloatArray(Hsl.VALUES) { (it - 11) / 30f }),
             grayscale = 0.6f,
+            vibrance = 0.3f,
+            colorGrade = ColorGrade.encode(floatArrayOf(0.1f, 0.5f, 0.3f, 0.4f, 0.6f, 0.5f, 0.5f, 0.1f)),
+            bwMix = BwMix.encode(FloatArray(8) { (it - 4) / 10f }),
+            vigRound = 0.3f, vigAspect = 0.7f,
+            denoiseLum = 0.4f, denoiseColor = 0.5f,
+            defringe = Defringe.encode(floatArrayOf(0.5f, 0.75f, 0.92f, 0.4f, 0.25f, 0.42f)),
+            lensCA = 1f, lensEnable = 1f, lensDistort = 0.2f, lensBlur = 0.3f, lensFocus = 0.6f,
+            geometry = Geometry.encode(floatArrayOf(5f, 0.2f, -0.1f, 0.1f, 0f, 0.1f, 0f, 0f)),
         )
         val r = SavedRecipe.create("FULL", "original", full)
         val back = nn(RecipeCodec.decode(RecipeCodec.encode(r)))
@@ -184,8 +193,9 @@ class RecipeCodecTest {
         val raw = XmpImport.parse("""crs:Saturation="-2" crs:Vibrance="+10"""").recipe
         val saved = SavedRecipe.create("MIX", "original", raw)
         val back = nn(RecipeCodec.decode(RecipeCodec.encode(saved)))
-        // The decoded value is the quantised one, and is stable from there.
-        assertEquals(1.078f, back.lab.adjustments.saturation, 0f)
+        // Saturation alone now (vibrance split out): 0.98 exactly.
+        assertEquals(0.98f, back.lab.adjustments.saturation, 0f)
+        assertEquals(0.1f, back.lab.vibrance, 0f)
         // Which is what makes the id stable, and the payload stable.
         assertEquals(saved.id, back.id)
         assertEquals(RecipeCodec.encode(saved), RecipeCodec.encode(back))
@@ -226,6 +236,14 @@ class RecipeCodecTest {
                 floatArrayOf(0.1f, -0.2f, 0.3f),
                 floatArrayOf(0.4f, 0.5f, -0.6f),
             ),
+            vibrance = 0.25f,
+            colorGrade = ColorGrade.encode(floatArrayOf(0.1f, 0.5f, 0.3f, 0.4f, 0.6f, 0.5f, 0.5f, 0f)),
+            bwMix = BwMix.encode(FloatArray(8) { 0.1f }),
+            vigRound = 0.4f, vigAspect = 0.6f,
+            denoiseLum = 0.3f, denoiseColor = 0.4f,
+            defringe = Defringe.encode(floatArrayOf(0.3f, 0.75f, 0.92f, 0.2f, 0.25f, 0.42f)),
+            lensCA = 1f, lensEnable = 1f, lensDistort = 0.1f, lensBlur = 0.2f, lensFocus = 0.6f,
+            geometry = Geometry.encode(floatArrayOf(5f, 0.1f, 0f, 0f, 0f, 0.1f, 0f, 0f)),
         )
         val first = SavedRecipe.create("FULL", "original", full)
         val back = nn(RecipeCodec.decode(RecipeCodec.encode(first)))

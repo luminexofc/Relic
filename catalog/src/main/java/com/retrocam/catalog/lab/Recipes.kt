@@ -116,7 +116,21 @@ data class SavedRecipe(
             append(lab.vigFeather).append(',')
             append(lab.hsl).append(',')
             append(RecipeCodec.q(lab.grayscale)).append(',')
-            append(lab.calibration).append('|')
+            append(lab.calibration).append(',')
+            append(RecipeCodec.q(lab.vibrance)).append(',')
+            append(lab.colorGrade).append(',')
+            append(lab.bwMix).append(',')
+            append(RecipeCodec.q(lab.vigRound)).append(',')
+            append(RecipeCodec.q(lab.vigAspect)).append(',')
+            append(RecipeCodec.q(lab.denoiseLum)).append(',')
+            append(RecipeCodec.q(lab.denoiseColor)).append(',')
+            append(lab.defringe).append(',')
+            append(RecipeCodec.q(lab.lensCA)).append(',')
+            append(RecipeCodec.q(lab.lensEnable)).append(',')
+            append(RecipeCodec.q(lab.lensDistort)).append(',')
+            append(RecipeCodec.q(lab.lensBlur)).append(',')
+            append(RecipeCodec.q(lab.lensFocus)).append(',')
+            append(lab.geometry).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -157,8 +171,8 @@ data class SavedRecipe(
  */
 object RecipeCodec {
 
-    /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 11
+    /** Bumped when the field list changes. v11 HSL+grayscale+calibration, v12 full LR panels. */
+    const val VERSION = 12
 
     private const val SEP = ","
 
@@ -172,7 +186,7 @@ object RecipeCodec {
      * RecipeCodecTest now asserts this against a real encode, so the two cannot
      * drift again without a red test rather than a blank app.
      */
-    private const val FIELD_COUNT = 50
+    private const val FIELD_COUNT = 64
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -213,6 +227,15 @@ object RecipeCodec {
             lab.hsl,
             q(lab.grayscale),
             lab.calibration,
+            q(lab.vibrance),
+            lab.colorGrade,
+            lab.bwMix,
+            q(lab.vigRound), q(lab.vigAspect),
+            q(lab.denoiseLum), q(lab.denoiseColor),
+            lab.defringe,
+            q(lab.lensCA), q(lab.lensEnable), q(lab.lensDistort),
+            q(lab.lensBlur), q(lab.lensFocus),
+            lab.geometry,
         ).joinToString(SEP)
     }
 
@@ -356,6 +379,20 @@ object RecipeCodec {
                     hsl = parts[47].takeIf { it != Hsl.NONE } ?: Hsl.NONE,
                     grayscale = parts[48].toFloat(),
                     calibration = parts[49].takeIf { it != Calibration.NONE } ?: Calibration.NONE,
+                    vibrance = parts[50].toFloat(),
+                    colorGrade = parts[51].takeIf { it != ColorGrade.NONE } ?: ColorGrade.NONE,
+                    bwMix = parts[52].takeIf { it != BwMix.NONE } ?: BwMix.NONE,
+                    vigRound = parts[53].toFloat(),
+                    vigAspect = parts[54].toFloat(),
+                    denoiseLum = parts[55].toFloat(),
+                    denoiseColor = parts[56].toFloat(),
+                    defringe = parts[57].takeIf { it != Defringe.NONE } ?: Defringe.NONE,
+                    lensCA = parts[58].toFloat(),
+                    lensEnable = parts[59].toFloat(),
+                    lensDistort = parts[60].toFloat(),
+                    lensBlur = parts[61].toFloat(),
+                    lensFocus = parts[62].toFloat(),
+                    geometry = parts[63].takeIf { it != Geometry.NONE } ?: Geometry.NONE,
                 ),
             )
             SavedRecipe(
