@@ -1,12 +1,23 @@
 package com.retrocam.catalog.lab
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XmpImportTest {
+
+    /**
+     * org.junit.Assert's assertNotNull returns Unit, so there is no way to get
+     * the value back out of it. This asserts and returns in one step, rather
+     * than repeating `!!` at every call site.
+     */
+    private fun <T : Any> nn(v: T?): T {
+        assertNotNull(v)
+        return v!!
+    }
 
     /** A real Lightroom 11 preset, trimmed but structurally identical. */
     private val modern = """
@@ -329,6 +340,100 @@ class XmpImportTest {
         assertTrue(res.ignored.any { it.key == "ToneCurvePV2012" && it.reason.orEmpty().contains("unreadable") })
     }
 
+    // ---- Color Mixer, grayscale, old split toning ----
+
+    /**
+     * The 24 HSL keys were the largest block of "no Lab equivalent" in a real
+     * preset, and they are plain -100..100 remaps, so all 24 are exact.
+     */
+    @Test
+    fun `the color mixer is imported not dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:HueAdjustmentGreen="+20" crs:SaturationAdjustmentGreen="-40"
+            crs:LuminanceAdjustmentGreen="+15" crs:HueAdjustmentBlue="+10"
+            crs:SaturationAdjustmentBlue="+30" crs:LuminanceAdjustmentBlue="-25"
+            """.trimIndent(),
+        )
+        assertEquals(0, res.ignored.size)
+        val v: FloatArray = nn(res.recipe.hslArray())
+        assertEquals(0.2f, v[Hsl.hueAt(3)], 1e-3f)
+        assertEquals(-0.4f, v[Hsl.satAt(3)], 1e-3f)
+        assertEquals(0.15f, v[Hsl.lumAt(3)], 1e-3f)
+        assertEquals(0.1f, v[Hsl.hueAt(5)], 1e-3f)
+        assertEquals(0.3f, v[Hsl.satAt(5)], 1e-3f)
+        assertEquals(-0.25f, v[Hsl.lumAt(5)], 1e-3f)
+        // And untouched bands stay neutral.
+        assertEquals(0f, v[Hsl.hueAt(0)], 1e-3f)
+        assertTrue(res.recipe.hslActive)
+    }
+
+    @Test
+    fun `color mixer values are clamped`() {
+        val res = XmpImport.parse(
+            """crs:HueAdjustmentRed="+9000" crs:SaturationAdjustmentBlue="-9000"""",
+        )
+        val v: FloatArray = nn(res.recipe.hslArray())
+        assertEquals(1f, v[Hsl.hueAt(0)], 1e-3f)
+        assertEquals(-1f, v[Hsl.satAt(5)], 1e-3f)
+    }
+
+    @Test
+    fun `a zeroed color mixer key is honoured and leaves the mixer off`() {
+        val res = XmpImport.parse(
+            """crs:HueAdjustmentRed="0" crs:SaturationAdjustmentRed="0"""",
+        )
+        assertEquals("neither key is unsupported", 0, res.ignored.size)
+        // Both are reported, as honoured neutrals.
+        assertEquals(2, res.exact.size)
+        assertFalse(res.recipe.hslActive)
+        assertEquals(Hsl.NONE, res.recipe.hsl)
+    }
+
+    @Test
+    fun `a preset with no color mixer leaves it off`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
+        assertFalse(r.hslActive)
+        assertNull(r.hslArray())
+    }
+
+    @Test
+    fun `grayscale is imported and clamped`() {
+        val on = XmpImport.parse("""crs:ConvertToGrayscale="True"""").recipe
+        assertEquals(1f, on.grayscale, 1e-4f)
+        // Explicitly off is honoured, not reported as a failure.
+        val off = XmpImport.parse("""crs:ConvertToGrayscale="False"""")
+        assertEquals(0, off.ignored.size)
+        assertEquals(0f, off.recipe.grayscale, 0f)
+        // The old continuous form still works.
+        val mix = XmpImport.parse("""crs:GrayscaleMix="60"""").recipe
+        assertEquals(0.6f, mix.grayscale, 1e-3f)
+    }
+
+    @Test
+    fun `old split toning drives the existing tints`() {
+        val r = XmpImport.parse(
+            """
+            crs:SplitToningShadowHue="+220" crs:SplitToningShadowSaturation="+40"
+            crs:SplitToningHighlightHue="+50" crs:SplitToningHighlightSaturation="+60"
+            crs:SplitToningBalance="+75"
+            """.trimIndent(),
+        ).recipe
+        assertTrue("balance should drive the split amount", r.splitAmount > 0f)
+        // A saturation of 40 out of 100 is a visible colour, not a neutral grey.
+        val shadow = unpackRgb(r.shadowTint)
+        assertTrue(
+            "shadow tint should be a colour, was $shadow",
+            shadow.any { it > 0.2f },
+        )
+        val highlight = unpackRgb(r.highlightTint)
+        assertTrue(
+            "highlight tint should be a colour, was $highlight",
+            highlight.any { it > 0.2f },
+        )
+    }
+
+    /** A preset that sets no tone curve leaves the recipe inactive. */
     @Test
     fun `a preset with no curve leaves the recipe inactive`() {
         val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe

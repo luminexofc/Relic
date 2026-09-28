@@ -33,7 +33,7 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "10",
+        version: String = "11",
         name: String = "X",
         base: String = "original",
         template: String = "-",
@@ -49,8 +49,9 @@ class RecipeCodecTest {
         ranges: List<String> = listOf("0", "0", "0", "0"),
         local: List<String> = listOf("0", "0", "0"),
         ops: List<String> = listOf("1", "0", "0", "1", "0.5", "0.5", "0.5"),
+        mixer: List<String> = listOf("-", "0"),
     ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut +
-        colour + stamp + reserved + stages + curves + ranges + local + ops)
+        colour + stamp + reserved + stages + curves + ranges + local + ops + mixer)
         .joinToString(",")
 
     @Test
@@ -59,13 +60,151 @@ class RecipeCodecTest {
         assertEquals(r, RecipeCodec.decode(RecipeCodec.encode(r)))
     }
 
+    /**
+     * The field count and the encoder are the same fact stated twice, and §4.7
+     * is what happens when they disagree: FIELD_COUNT was 48 for 47 fields, so
+     * every decode returned null and the app had no recipes at all.
+     *
+     * A hand-written 47 here was one more place to forget, so the count is now
+     * derived from what the encoder actually produces. Appending a field to
+     * `encode` without updating `FIELD_COUNT` fails HERE, loudly, instead of
+     * silently making the app unable to read anything.
+     */
+    @Test
+    fun `field count matches the encoder`() {
+        val enc = RecipeCodec.encode(recipe())
+        val built = enc.split(',').size
+        // And a hand-built payload of the same shape must also be the same
+        // length, which is what catches a payload() helper that fell behind.
+        assertEquals(built, payload().split(',').size, "payload() is out of step with encode()")
+        // If these ever disagree the app is unreadable, so pin the number too.
+        assertEquals(49, built, "field count changed; bump FIELD_COUNT and this test")
+    }
+
+    /**
+     * A recipe carrying every field, round tripped.
+     *
+     * The `round trips` test above uses a recipe that leaves most fields
+     * neutral, so a field that is written wrongly but read back consistently
+     * can hide in the gap: encode writes the wrong thing and decode reads that
+     * same wrong thing, and the two never notice. This one sets something
+     * non-neutral in every field, which is the only way to catch a pair of
+     * matching mistakes.
+     *
+     * It found a real one: the packed colour mixer and the grayscale switch
+     * were being written to the payload and read back from the wrong index,
+     * because the two new fields were appended after a field list that had
+     * already been updated. Both halves were individually plausible.
+     */
+    @Test
+    fun `every field survives a round trip when every field is set`() {
+        val full = LabRecipe(
+            templateId = "SEPIA",
+            adjustments = LabAdjustments(0.1f, 1.2f, 0.8f, 0.4f, -0.2f),
+            vignette = 0.3f, grain = 0.4f, sharpen = 0.5f, blur = 0.1f,
+            glitch = 0.2f, duotone = 0.3f,
+            duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
+            lutId = "builtin_faded", lutAmount = 0.7f,
+            gamma = 1.25f, splitAmount = 0.4f,
+            shadowTint = 0xFF203040.toInt(), highlightTint = 0xFF403020.toInt(),
+            stampText = "'98", stampColor = 0xFFFF8C14.toInt(),
+            stampPosition = StampPosition.CENTER, stampAlpha = 0.7f,
+            watermarkId = "mark_x", watermarkAlpha = 0.5f,
+            watermarkPosition = StampPosition.TOP_LEFT,
+            toneCurves = ToneCurve.encodeGroup(
+                List(4) { FloatArray(ToneCurve.SIZE) { (it * 0.9f + 20f) / 255f } },
+            ),
+            highlights = 0.1f, shadows = 0.2f, whites = 0.3f, blacks = 0.4f,
+            texture = 0.5f, clarity = 0.6f, dehaze = 0.7f,
+            sharpRadius = 1.5f, detail = 0.8f, masking = 0.9f,
+            grainSize = 2f, grainRough = 0.3f,
+            vigMidpoint = 0.2f, vigFeather = 0.7f,
+            hsl = Hsl.encode(FloatArray(Hsl.VALUES) { (it - 11) / 30f }),
+            grayscale = 0.6f,
+        )
+        val r = SavedRecipe.create("FULL", "original", full)
+        val back = nn(RecipeCodec.decode(RecipeCodec.encode(r)))
+        val got = back.lab
+        assertEquals(full, got, "a fully-populated recipe must round trip exactly")
+    }
+
+    /**
+     * The two packed colour fields are read from their own indices.
+     *
+     * A pinned spot check, because "the whole thing round trips" can be
+     * satisfied by a matched pair of mistakes, and these two were written and
+     * read at different offsets.
+     */
+    @Test
+    fun `the color mixer and grayscale land in their own fields`() {
+        val r = SavedRecipe.create(
+            "FIELDS", "original",
+            LabRecipe(hsl = Hsl.encode(FloatArray(Hsl.VALUES) { if (it == 4) 0.75f else 0f }), grayscale = 0.5f),
+        )
+        val back = nn(RecipeCodec.decode(RecipeCodec.encode(r)))
+        assertEquals(0.5f, back.lab.grayscale, 1e-4f)
+        val v = nn(back.lab.hslArray())
+        assertEquals(0.75f, v[4], 1e-3f)
+        for (i in 0 until Hsl.VALUES) if (i != 4) assertEquals(0f, v[i], 1e-3f)
+    }
+
+    /**
+     * An imported preset has to survive being saved, shared and reloaded.
+     *
+     * This is the end-to-end path the Filter Lab actually takes, and it is the
+     * only test that covers it: parse, coerce, encode, decode. The gap it found
+     * is that `q()` quantises to 4 decimal places, so a gamma of 2^0.15 =
+     * 1.1095694 came back as 1.1096 and the recipe compared unequal to itself.
+     *
+     * That is harmless for rendering - a 4dp knob cannot be seen - and harmful
+     * here, because the content id is hashed over the quantised value, so
+     * re-importing the same preset twice minted two strip entries that looked
+     * identical. The tolerance below is the honest statement of what the codec
+     * promises; the id assertion is the one that actually has to hold.
+     */
+    @Test
+    fun `an imported preset survives save share and reload`() {
+        val xmp = """
+          crs:ProcessVersion="11.0" crs:Contrast2012="+12" crs:Exposure2012="+0.15"
+          crs:HueAdjustmentGreen="-15" crs:SaturationAdjustmentGreen="-20"
+          crs:SharpenRadius="0.8" crs:SharpenDetail="25" crs:SharpenEdgeMasking="40"
+          crs:GrainSize="11" crs:GrainFrequency="40" crs:VignetteAmount="-22"
+          crs:Highlights2012="-40" crs:Shadows2012="+38" crs:Clarity2012="+8"
+          crs:Copyright="Someone" crs:HasSettings="True" crs:SupportsColor="True"
+        """.trimIndent()
+        val imported = XmpImport.parse(xmp).recipe
+        val saved = SavedRecipe.create("PORTRA", "original", imported)
+        val payload = RecipeCodec.encode(saved)
+        val back = nn(RecipeCodec.decode(payload))
+
+        // The knobs that are quantised to 4dp must come back within that.
+        assertEquals(saved.lab.gamma, back.lab.gamma, 1e-4f)
+        assertEquals(saved.lab.hsl, back.lab.hsl)
+        assertEquals(saved.lab.sharpRadius, back.lab.sharpRadius, 1e-4f)
+        assertEquals(saved.lab.masking, back.lab.masking, 1e-4f)
+        assertEquals(saved.lab.grainSize, back.lab.grainSize, 1e-4f)
+        assertEquals(saved.lab.vignette, back.lab.vignette, 1e-4f)
+        assertEquals(saved.lab.clarity, back.lab.clarity, 1e-4f)
+
+        // The part that genuinely has to hold: encoding it again is stable, so
+        // the content id is stable and a re-import updates the strip entry
+        // rather than adding a duplicate of a recipe that looks identical.
+        assertEquals(payload, RecipeCodec.encode(back))
+        assertEquals(saved.id, back.id)
+    }
+
+    /** JUnit's assertNotNull returns Unit, so this does both in one step. */
+    private fun <T : Any> nn(v: T?): T {
+        kotlin.test.assertNotNull(v)
+        return v!!
+    }
+
     @Test
     fun `encoded form has the expected field count even though the numbers are decimal`() {
         // Regression guard. The separator was originally a dot, which split every
         // decimal knob in half and turned the fields into double, so every decode
         // returned null. Assert the shape directly so that failure is obvious.
         val enc = RecipeCodec.encode(recipe())
-        assertEquals(47, enc.split(',').size, "bad field count in '$enc'")
         assertTrue(enc.contains('.'), "knobs should still be readable decimals")
     }
 

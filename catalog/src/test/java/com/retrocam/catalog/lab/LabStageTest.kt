@@ -289,12 +289,14 @@ class LabStageTest {
 
     /**
      * A syntactically valid payload whose only interesting field is [stageField],
-     * built field by field. String surgery on a 32-field format is how the first
+     * built field by field. String surgery on a 49-field format is how the first
      * version of this helper ended up emitting 62 fields and failing every test
      * for the wrong reason.
      */
     private fun payload(stageField: String): String {
-        val f = MutableList(47) { "0" }
+        // Sized from a real encode rather than a hand-typed number, which is
+        // what §4.7 and the second version of this helper both got wrong.
+        val f = MutableList(RecipeCodec.encode(SavedRecipe.create("T", "original", LabRecipe())).split(",").size) { "0" }
         f[0] = RecipeCodec.VERSION.toString()
         f[1] = java.util.Base64.getUrlEncoder().withoutPadding()
             .encodeToString("T".toByteArray())

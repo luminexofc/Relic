@@ -14,6 +14,7 @@ import android.media.MediaRecorder
 import com.retrocam.catalog.FilterFamily
 import com.retrocam.catalog.FilterCatalog
 import com.retrocam.catalog.FilterSpec
+import com.retrocam.catalog.lab.Hsl
 import com.retrocam.catalog.lab.LabMask
 import com.retrocam.catalog.lab.LabPrimitives
 import com.retrocam.catalog.lab.LabStage
@@ -83,6 +84,10 @@ class FilterRenderer(
         val uSaturation: Int,
         val uRanges: Int,
         val uLocal: Int,
+        /** Base location of `u_hsl[8]`; one location covers the whole array. */
+        val uHsl: Int,
+        val uHslActive: Int,
+        val uGrayscale: Int,
         val uSharpRadius: Int,
         val uDetail: Int,
         val uMasking: Int,
@@ -724,6 +729,11 @@ class FilterRenderer(
                 uSaturation = GLES20.glGetUniformLocation(p, "u_saturation"),
                 uRanges = GLES20.glGetUniformLocation(p, "u_ranges"),
                 uLocal = GLES20.glGetUniformLocation(p, "u_local"),
+                // An array uniform's base name is the location of element 0, and
+                // glUniform4fv with count 8 writes all eight from that one.
+                uHsl = GLES20.glGetUniformLocation(p, "u_hsl"),
+                uHslActive = GLES20.glGetUniformLocation(p, "u_hslActive"),
+                uGrayscale = GLES20.glGetUniformLocation(p, "u_grayscale"),
                 uSharpRadius = GLES20.glGetUniformLocation(p, "u_sharpRadius"),
                 uDetail = GLES20.glGetUniformLocation(p, "u_detail"),
                 uMasking = GLES20.glGetUniformLocation(p, "u_masking"),
@@ -1079,6 +1089,16 @@ class FilterRenderer(
             GLES20.glUniform4f(prog.uRanges, r[0], r[1], r[2], r[3])
             val l = u.local
             GLES20.glUniform3f(prog.uLocal, l[0], l[1], l[2])
+            // u_hsl is eight vec4s; the base location plus a count writes them
+            // all. Skipped entirely when the mixer is off, which is the point of
+            // carrying u_hslActive separately.
+            if (u.hslActive > 0f) {
+                GLES20.glUniform4fv(prog.uHsl, Hsl.BANDS, u.hsl, 0)
+                GLES20.glUniform1f(prog.uHslActive, u.hslActive)
+            } else {
+                GLES20.glUniform1f(prog.uHslActive, 0f)
+            }
+            GLES20.glUniform1f(prog.uGrayscale, u.grayscale)
             GLES20.glUniform1f(prog.uSharpRadius, u.sharpRadius)
             GLES20.glUniform1f(prog.uDetail, u.detail)
             GLES20.glUniform1f(prog.uMasking, u.masking)

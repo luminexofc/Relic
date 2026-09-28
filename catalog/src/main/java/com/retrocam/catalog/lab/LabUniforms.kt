@@ -42,6 +42,16 @@ data class LabUniforms(
     val ranges: FloatArray,
     /** `[texture, clarity, dehaze]`, each -1..1. */
     val local: FloatArray,
+    /**
+     * Eight vec4s of (hue, saturation, luminance), each -1..1, as the shader's
+     * `u_hsl[8]`. Always [Hsl.VALUES] long so the array upload is a fixed
+     * shape; all zeros when the mixer is off.
+     */
+    val hsl: FloatArray,
+    /** 1 when any band is off neutral, which is what makes the shader skip it. */
+    val hslActive: Float,
+    /** Adobe's Grayscale switch, 0..1. */
+    val grayscale: Float,
     val sharpRadius: Float,
     val detail: Float,
     val masking: Float,
@@ -133,6 +143,9 @@ data class LabUniforms(
             grainRough = recipe.grainRough,
             vigMid = recipe.vigMidpoint,
             vigFeather = recipe.vigFeather,
+            hsl = recipe.hslArray() ?: FloatArray(Hsl.VALUES),
+            hslActive = if (recipe.hslActive) 1f else 0f,
+            grayscale = recipe.grayscale.coerceIn(0f, 1f),
             curveTex = if (recipe.toneCurveActive) {
                 ToneCurve.toRgba(ToneCurve.parseGroup(recipe.toneCurves))
             } else {

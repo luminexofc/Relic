@@ -133,10 +133,38 @@ data class LabRecipe(
     // The XMP import reports them as dropped rather than pretending.
     val vigMidpoint: Float = 0.5f,
     val vigFeather: Float = 0.5f,
+
+    /**
+     * Adobe's Color Mixer: eight hue bands x (hue rotation, saturation scale,
+     * luminance scale), as [Hsl.VALUES] numbers, or [Hsl.NONE].
+     *
+     * One string field rather than twenty-four floats. Twenty-four constructor
+     * parameters, twenty-four lines in `coerce` and twenty-four codec fields
+     * would be twenty-four places to forget one, and §4.7 is exactly that
+     * failure: a field count one off made every recipe in the app decode to
+     * null. Packed, it is one field and the round-trip tests cover it whole.
+     */
+    val hsl: String = Hsl.NONE,
+
+    /**
+     * Adobe's Grayscale switch, 0..1.
+     *
+     * The only XMP colour key that removes colour rather than shifting it, and
+     * the reason a black and white preset cannot be reproduced by turning
+     * Saturation to -100: that is a luma-weighted desaturation and it does not
+     * produce the neutral of a real channel mix.
+     */
+    val grayscale: Float = 0f,
 ) {
     /** True when any local-contrast control is off neutral. */
     val localActive: Boolean
         get() = texture != 0f || clarity != 0f || dehaze != 0f
+
+    /** The parsed [Hsl.VALUES] adjustments, or null when the mixer is off. */
+    fun hslArray(): FloatArray? = Hsl.parse(hsl)
+
+    /** True when the color mixer would change something. */
+    val hslActive: Boolean get() = Hsl.isActive(hslArray())
 
     /** `[texture, clarity, dehaze]`. */
     fun localArray(): FloatArray = floatArrayOf(texture, clarity, dehaze)
@@ -159,7 +187,8 @@ data class LabRecipe(
     /** True when any grading or any effect is actually doing something. */
     val isIdentity: Boolean
         get() = templateId == null && adjustments.isNeutral && !hasEffects &&
-            stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive
+            stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive &&
+            !hslActive && grayscale == 0f
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -190,6 +219,8 @@ data class LabRecipe(
         if (detail != 0f) add("detail")
         if (masking != 0f) add("masking")
         if (vigMidpoint != 0.5f || vigFeather != 0.5f) add("vignette falloff")
+        if (hslActive) add("color mixer")
+        if (grayscale > 0f) add("grayscale")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -259,6 +290,11 @@ data class LabRecipe(
             grainRough = r.grainRough.coerceIn(0f, 1f),
             vigMidpoint = r.vigMidpoint.coerceIn(0f, 1f),
             vigFeather = r.vigFeather.coerceIn(0f, 1f),
+            // Re-encoded rather than trusted: a hand-edited field is clamped and
+            // quantised here, and an unreadable one becomes NONE, so the shader
+            // can index the array blind.
+            hsl = Hsl.encode(r.hslArray()),
+            grayscale = r.grayscale.coerceIn(0f, 1f),
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

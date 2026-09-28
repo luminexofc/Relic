@@ -113,7 +113,9 @@ data class SavedRecipe(
             append(RecipeCodec.q(lab.grainSize)).append(',')
             append(RecipeCodec.q(lab.grainRough)).append(',')
             append(RecipeCodec.q(lab.vigMidpoint)).append(',')
-            append(lab.vigFeather).append('|')
+            append(lab.vigFeather).append(',')
+            append(lab.hsl).append(',')
+            append(RecipeCodec.q(lab.grayscale)).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -155,10 +157,21 @@ data class SavedRecipe(
 object RecipeCodec {
 
     /** Bumped when the field list changes. v2 effects, v3 LUT pair, v4 overlays. */
-    const val VERSION = 10
+    const val VERSION = 11
 
     private const val SEP = ","
-    private const val FIELD_COUNT = 47
+
+    /**
+     * How many fields [encode] writes.
+     *
+     * There is exactly one list of fields in this file and this constant is a
+     * hand-typed copy of its length, which is the shape of the §4.7 bug: it was
+     * 48 for 47 fields, so *every* recipe in the app decoded to null and the
+     * round-trip tests caught it. `field count matches the encoder` in
+     * RecipeCodecTest now asserts this against a real encode, so the two cannot
+     * drift again without a red test rather than a blank app.
+     */
+    private const val FIELD_COUNT = 49
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -196,6 +209,8 @@ object RecipeCodec {
             q(lab.sharpRadius), q(lab.detail), q(lab.masking),
             q(lab.grainSize), q(lab.grainRough),
             q(lab.vigMidpoint), q(lab.vigFeather),
+            lab.hsl,
+            q(lab.grayscale),
         ).joinToString(SEP)
     }
 
@@ -336,6 +351,8 @@ object RecipeCodec {
                     grainRough = parts[44].toFloat(),
                     vigMidpoint = parts[45].toFloat(),
                     vigFeather = parts[46].toFloat(),
+                    hsl = parts[47].takeIf { it != Hsl.NONE } ?: Hsl.NONE,
+                    grayscale = parts[48].toFloat(),
                 ),
             )
             SavedRecipe(

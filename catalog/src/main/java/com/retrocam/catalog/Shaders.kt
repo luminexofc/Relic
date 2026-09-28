@@ -110,6 +110,116 @@ object Shaders {
         /** Texture, Clarity, Dehaze, each -1..1. */
         uniform vec3 u_local;
 
+        /**
+         * Adobe's Grayscale switch, 0..1. A mix toward luma, which is NOT the
+         * same as Saturation at -100: that one is `mix(lum, c, s)` on the same
+         * weights, so it goes to full luma too, but Adobe's B&W mixes channels
+         * with their own coefficients. This is the same mix, kept separate so
+         * the two controls are not the same knob twice.
+         */
+        uniform float u_grayscale;
+
+        // Adobe's Color Mixer: eight hue bands, each a hue rotation, a
+        // saturation scale and a luminance scale, in -1..1. u_hslActive is 0
+        // unless a band is off neutral, so the step costs nothing for a recipe
+        // that does not use it. Mirrored by Hsl in Kotlin, which is the
+        // testable copy and which HslShaderTest checks against this file.
+        uniform vec4 u_hsl[8];
+        uniform float u_hslActive;
+
+        // One HSL hue channel, t in turns, 0..1 wrapping. Declared before
+        // hslToRgb because GLSL requires definition before use.
+        float channelOf(float t, float p, float q) {
+            if (t < 1.0 / 6.0) return p + (q - p) * 6.0 * t;
+            if (t < 0.5) return q;
+            if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6.0;
+            return p;
+        }
+
+        // RGB to HSL, hue in degrees 0..360. Hue is meaningless with no
+        // saturation, so it is reported as 0 rather than divided by zero: a grey
+        // pixel has no band preference, and a rotation of 0 is a no-op.
+        vec3 rgbToHsl(vec3 c) {
+            float mx = max(c.r, max(c.g, c.b));
+            float mn = min(c.r, min(c.g, c.b));
+            float d = mx - mn;
+            float l = (mx + mn) * 0.5;
+            if (d == 0.0) return vec3(0.0, 0.0, l);
+            float s = (l > 0.5) ? d / (2.0 - mx - mn) : d / (mx + mn);
+            float h;
+            if (mx == c.r)      h = (c.g - c.b) / d + (c.g < c.b ? 6.0 : 0.0);
+            else if (mx == c.g) h = (c.b - c.r) / d + 2.0;
+            else                h = (c.r - c.g) / d + 4.0;
+            return vec3(h * 60.0, s, l);
+        }
+
+        vec3 hslToRgb(vec3 hsl) {
+            float s = clamp(hsl.y, 0.0, 1.0);
+            float l = clamp(hsl.z, 0.0, 1.0);
+            if (s == 0.0) return vec3(l);
+            float q = (l < 0.5) ? l * (1.0 + s) : l + s - l * s;
+            float p = 2.0 * l - q;
+            float hk = fract(hsl.x / 360.0);
+            return vec3(
+                channelOf(fract(hk + 1.0 / 3.0), p, q),
+                channelOf(hk, p, q),
+                channelOf(fract(hk - 1.0 / 3.0), p, q)
+            );
+        }
+
+        // Band centres, in the order Hsl.CENTRES: red 0, orange 30, yellow 60,
+        // green 120, aqua 180, blue 225, purple 270, magenta 315. Uneven on
+        // purpose - these are Adobe's, and evenly spacing them would put green
+        // at 135 where green does not live. Reach is half the largest gap
+        // between centres, so every hue is inside at least one band.
+        float hslCentre(int band) {
+            if (band == 0) return 0.0;
+            if (band == 1) return 30.0;
+            if (band == 2) return 60.0;
+            if (band == 3) return 120.0;
+            if (band == 4) return 180.0;
+            if (band == 5) return 225.0;
+            if (band == 6) return 270.0;
+            return 315.0;
+        }
+
+        /**
+         * Band weight for a hue, before normalisation: a raised cosine 30
+         * degrees either side of the band centre. The caller divides by the
+         * total, which is what turns Adobe's uneven spacing into a blend
+         * rather than a gap, and which means there is no edge on the colour
+         * wheel to show as a seam across a sky gradient.
+         */
+        float hslWeight(float hueDeg, int band) {
+            float d = abs(mod(hueDeg - hslCentre(band) + 540.0, 360.0) - 180.0);
+            if (d >= 35.0) return 0.0;
+            return 0.5 * (1.0 + cos(3.14159265 * d / 35.0));
+        }
+
+        /**
+         * Adobe's Color Mixer over one pixel. The band is chosen from the
+         * ORIGINAL hue, so a rotation cannot walk a pixel into the next band's
+         * adjustment as it moves.
+         */
+        vec3 hslBands(vec3 c, vec4 b[8]) {
+            vec3 hsl = rgbToHsl(c);
+            vec3 adj = vec3(0.0);
+            float total = 0.0;
+            for (int i = 0; i < 8; i++) {
+                float w = hslWeight(hsl.x, i);
+                adj += b[i].xyz * w;
+                total += w;
+            }
+            if (total > 0.0) adj /= total;
+            return hslToRgb(vec3(
+                // 100 degrees at full scale, matching Hsl.HUE_DEGREES. This was
+                // 3.6 once, which is a nudge rather than a rotation.
+                hsl.x + adj.x * 100.0,
+                hsl.y * (1.0 + adj.y),
+                hsl.z * (1.0 + adj.z)
+            ));
+        }
+
         uniform float u_gamma;
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
@@ -1110,7 +1220,14 @@ object Shaders {
                 c = mix(vec3(lum), c, u_saturation);
             }
 
-            // --- 8. Tone Curve, then Look. Fourteen in Adobe's order, and the
+            // --- 8. Grayscale, the last of Adobe's colour controls. After
+            // saturation, so a preset that sets both gets the switch as the
+            // final word, which is what ConvertToGrayscale means. ---
+            if (u_grayscale > 0.0) {
+                c = mix(c, vec3(luminance(c)), u_grayscale);
+            }
+
+            // --- 9. Tone Curve, then Look. Fourteen in Adobe's order, and the
             // single largest thing an XMP preset carries.
             // Three fetches cover all four curves: fetching at each input
             // channel returns every curve evaluated at that input, so the
@@ -1126,6 +1243,18 @@ object Shaders {
             }
 
             c = clamp(c, 0.0, 1.0);
+
+            // --- 10. Color Mixer, eight hue bands. After the curve, because
+            // the curve decides what colour each band actually contains, and
+            // before the LUT, because a LUT is a look transform applied on top
+            // of a grade rather than part of it.
+            //
+            // No texture fetches: the band weights are arithmetic. u_hslActive
+            // is 0 unless a band is off neutral, so a recipe that does not use
+            // the mixer pays nothing for it.
+            if (u_hslActive > 0.0) {
+                c = clamp(hslBands(c, u_hsl), 0.0, 1.0);
+            }
 
             // --- 3D LUT (Hald CLUT) ---
             // Upstream's index maths, transcribed. Must stay in step with

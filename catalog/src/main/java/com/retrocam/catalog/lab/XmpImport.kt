@@ -148,6 +148,17 @@ object XmpImport {
         if (v == v.roundToInt().toFloat()) v.roundToInt().toString() else v.toString()
 
     /**
+     * The short name of a Color Mixer key, so the report says
+     * "GREEN HUE" rather than repeating a forty-character key name 24 times.
+     */
+    private fun kindOf(key: String): String = when {
+        key.startsWith("HueAdjustment") -> "HUE"
+        key.startsWith("SaturationAdjustment") -> "SAT"
+        key.startsWith("LuminanceAdjustment") -> "LUM"
+        else -> key
+    }
+
+    /**
      * Keys that are in the file but change nothing about the picture.
      *
      * Split into two lists on purpose. [SILENT] is historical: keys that were
@@ -274,6 +285,14 @@ object XmpImport {
         var vigMid = 0.5f
         var vigFeather = 0.5f
         var vignette = 0f
+
+        // Old split toning, whose hue/saturation pairs become two colours.
+        var shadowHue = 0f
+        var shadowSat = 0f
+        var highlightHue = 0f
+        var highlightSat = 0f
+        var splitShadowTint = LabRecipe.DEFAULT_SHADOW_TINT
+        var splitHighlightTint = LabRecipe.DEFAULT_HIGHLIGHT_TINT
 
         fun add(key: String, value: String, mapsTo: String, approx: Boolean = false) {
             keys += XmpKey(
@@ -482,6 +501,87 @@ object XmpImport {
             vignette = (kotlin.math.abs(v) / 100f).coerceIn(0f, 1f)
         }
 
+        // ---- Adobe's Color Mixer: 8 bands x (hue, saturation, luminance) ----
+        // Twenty-four keys, and the largest single group in a real preset after
+        // the ones that were never being read at all. Each is a plain -100..100
+        // remap, so all twenty-four are exact.
+        val hsl = FloatArray(Hsl.VALUES)
+        var anyHsl = false
+        for (band in 0 until Hsl.BANDS) {
+            val suffix = Hsl.XMP_SUFFIXES[band]
+            listOf(
+                "HueAdjustment$suffix" to Hsl.hueAt(band),
+                "SaturationAdjustment$suffix" to Hsl.satAt(band),
+                "LuminanceAdjustment$suffix" to Hsl.lumAt(band),
+            ).forEach { (key, slot) ->
+                knob(key, "${Hsl.BAND_NAMES[band]} ${kindOf(key)}") { _, v ->
+                    hsl[slot] = (v / 100f).coerceIn(-1f, 1f)
+                    anyHsl = true
+                }
+            }
+        }
+
+        // ---- grayscale: a real switch, and the only colour key that removes
+        // colour outright rather than shifting it ----
+        var grayscale = 0f
+        resolve(a, "ConvertToGrayscale")?.let { (name, raw) ->
+            val on = when (raw.trim()) {
+                "True", "true", "1" -> 1f
+                "False", "false", "0" -> 0f
+                else -> null
+            }
+            if (on == null) {
+                drop(name, "not a boolean")
+            } else if (on == 0f) {
+                neutral(name, raw)
+            } else {
+                grayscale = 1f
+                add(name, raw, "GRAYSCALE")
+            }
+        }
+        // GrayscaleMix* is the old, continuous form of the same switch. A file
+        // carrying both has said the same thing twice and we apply it once.
+        if (grayscale == 0f) {
+            knob("GrayscaleMix", "GRAYSCALE", approx = true) { _, v ->
+                grayscale = (v / 100f).coerceIn(0f, 1f)
+            }
+        }
+
+        // ---- old split toning: five keys, and the Lab already has the three
+        // controls they map onto ----
+        var splitAmount = 0f
+        knob("SplitToningBalance", "SPLIT BALANCE", approx = true) { _, v ->
+            // Balance is 0..100 with 50 neutral, and it moves where the two
+            // tints meet rather than how strong they are. The Lab's tints are
+            // mirrored about mid grey, so balance maps onto how much of each is
+            // applied, which is the closest thing here.
+            val b = (v / 100f).coerceIn(0f, 1f)
+            splitAmount = kotlin.math.abs(b - 0.5f) * 2f
+        }
+        knob("SplitToningShadowHue", "SHADOW TINT HUE", approx = true) { _, v ->
+            shadowHue = (v / 100f).coerceIn(0f, 1f)
+        }
+        knob("SplitToningShadowSaturation", "SHADOW TINT SAT", approx = true) { _, v ->
+            shadowSat = (v / 100f).coerceIn(0f, 1f)
+        }
+        knob("SplitToningHighlightHue", "HIGHLIGHT TINT HUE", approx = true) { _, v ->
+            highlightHue = (v / 100f).coerceIn(0f, 1f)
+        }
+        knob("SplitToningHighlightSaturation", "HIGHLIGHT TINT SAT", approx = true) { _, v ->
+            highlightSat = (v / 100f).coerceIn(0f, 1f)
+        }
+        // The old keys carry hue and saturation; the Lab carries a colour. The
+        // conversion is a guess about which colour was meant, so it is
+        // approximate, and only fires when the preset actually asked for it.
+        if (shadowSat > 0f) {
+            val c = Hsl.hslToRgb(shadowHue * 360f, shadowSat, 0.5f)
+            splitShadowTint = packRgb(c[0], c[1], c[2])
+        }
+        if (highlightSat > 0f) {
+            val c = Hsl.hslToRgb(highlightHue * 360f, highlightSat, 0.5f)
+            splitHighlightTint = packRgb(c[0], c[1], c[2])
+        }
+
         // ---- everything else, reported rather than silently dropped ----
         for (k in listOf("AutoBrightness", "Auto Tone")) drop(k, "needs a scene analysis")
         for (k in listOf("PostCropVignetteRoundness", "PostCropVignetteAspect")) {
@@ -533,6 +633,11 @@ object XmpImport {
                 grainRough = grainRough,
                 vigMidpoint = vigMid,
                 vigFeather = vigFeather,
+                hsl = if (anyHsl) Hsl.encode(hsl) else Hsl.NONE,
+                grayscale = grayscale,
+                splitAmount = splitAmount,
+                shadowTint = splitShadowTint,
+                highlightTint = splitHighlightTint,
                 vignette = vignette,
             ),
             keys = keys,
