@@ -22,7 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.retrocam.ui.components.ShadcnInput
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -90,6 +93,9 @@ fun LabScreen(viewModel: CameraViewModel) {
     var texture by remember { mutableStateOf<SurfaceTexture?>(null) }
     val renderer = remember { FilterRenderer(onTextureReady = { texture = it }) }
     var glView by remember { mutableStateOf<GLSurfaceView?>(null) }
+    // A blank recipe has nothing worth saving, so the icon stays dimmed until
+    // something has actually been changed.
+    val canSave = viewModel.canSaveLab()
     /**
      * Which stage the viewfinder drag and the area controls act on.
      *
@@ -98,6 +104,9 @@ fun LabScreen(viewModel: CameraViewModel) {
      * nobody and the mask could never be drawn in the first place.
      */
     var selectedStage by remember { mutableStateOf(0) }
+    // The name is asked for on demand, when Save is tapped, not while editing.
+    // Held here because the header button opens it and the dialog reads it.
+    var showSaveDialog by remember { mutableStateOf(false) }
     // -1 when there is nothing to select, and clamped otherwise.
     //
     // This must NOT be `coerceIn(0, (size - 1).coerceAtLeast(0))`: that yields 0
@@ -213,6 +222,24 @@ fun LabScreen(viewModel: CameraViewModel) {
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f),
             )
+            // Save lives up here rather than at the bottom of a scrolling panel,
+            // where it was a row you had to scroll back to find. The name is only
+            // asked for once you actually tap it, so a slider you keep nudging
+            // never puts a text field in the way.
+            ShadcnButton(
+                onClick = { showSaveDialog = true },
+                variant = ButtonVariant.Ghost,
+                size = ButtonSize.Icon,
+                enabled = canSave,
+                leading = {
+                    Icon(
+                        Icons.Filled.Save,
+                        "Save this look",
+                        tint = if (canSave) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+                    )
+                },
+            )
             ShadcnButton(
                 onClick = { viewModel.flipCamera() },
                 variant = ButtonVariant.Ghost,
@@ -294,14 +321,11 @@ fun LabScreen(viewModel: CameraViewModel) {
         // ---- controls ----
         FilterLabPanel(
             tab = state.labTab,
-            name = state.labName,
             recipe = state.labRecipe,
             intensity = state.labIntensity,
             saved = state.labRecipes,
-            canSave = viewModel.canSaveLab(),
             selectedRecipeId = state.savedRecipeId,
             onTab = viewModel::setLabTab,
-            onName = viewModel::setLabName,
             onTemplate = viewModel::setLabTemplate,
             onKnob = viewModel::setLabKnob,
             onResetKnob = viewModel::resetLabKnob,
@@ -358,10 +382,96 @@ fun LabScreen(viewModel: CameraViewModel) {
             onUse = viewModel::useRecipeInCamera,
             onDeleteSelected = viewModel::clearLabSelection,
             onIntensity = viewModel::setLabIntensity,
-            onSave = viewModel::saveLab,
             onEdit = viewModel::editLabRecipe,
             onDelete = viewModel::deleteLabRecipe,
         )
+
+        // The name is only ever asked for at the moment of saving, so the panel
+        // has no text field in it at all while you are adjusting sliders.
+        if (showSaveDialog) {
+            SaveNameDialog(
+                initial = state.labName.ifBlank { state.labBaseId.uppercase() },
+                onDismiss = { showSaveDialog = false },
+                onConfirm = { name ->
+                    viewModel.setLabName(name)
+                    viewModel.saveLab()
+                    showSaveDialog = false
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Asks for a name, then saves.
+ *
+ * Split from [ShadcnDialog] because that one is a list picker and this needs a
+ * text field; the shell is copied from it so the two do not look like different
+ * applications. Enter saves, so the keyboard's own action key is the same as
+ * tapping Save.
+ */
+@Composable
+private fun SaveNameDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial) }
+    BackHandler(onBack = onDismiss)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.6f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .padding(32.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(ShadcnRadius.Lg))
+                .background(MaterialTheme.colorScheme.surface)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                )
+                .padding(20.dp),
+        ) {
+            Text(
+                "NAME THIS LOOK",
+                fontFamily = AppType.Sans,
+                fontWeight = AppType.Strong,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(Modifier.height(12.dp))
+            ShadcnInput(
+                value = name,
+                onValueChange = { name = it },
+                placeholder = "Name it",
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ShadcnButton(
+                    text = "Cancel",
+                    onClick = onDismiss,
+                    variant = ButtonVariant.Outline,
+                    modifier = Modifier.weight(1f),
+                )
+                ShadcnButton(
+                    text = "Save",
+                    onClick = { onConfirm(name) },
+                    variant = ButtonVariant.Default,
+                    enabled = name.isNotBlank(),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
     }
 }
 

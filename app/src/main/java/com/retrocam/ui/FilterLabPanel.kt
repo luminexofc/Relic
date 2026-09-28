@@ -28,6 +28,12 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.WbSunny
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +48,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,8 +65,8 @@ import com.retrocam.catalog.lab.Defringe
 import com.retrocam.catalog.lab.Geometry
 import com.retrocam.catalog.lab.Hsl
 import com.retrocam.catalog.lab.LAB_EFFECTS
-import com.retrocam.catalog.lab.LAB_KNOB_GROUPS
 import com.retrocam.catalog.lab.LabKnob
+import com.retrocam.catalog.lab.LabKnobGroup
 import com.retrocam.catalog.lab.ToneCurve
 import com.retrocam.catalog.lab.effectValue
 import com.retrocam.catalog.lab.hslBand
@@ -70,7 +78,6 @@ import com.retrocam.ui.components.ButtonSize
 import com.retrocam.ui.components.ButtonVariant
 import com.retrocam.ui.components.ShadcnButton
 import com.retrocam.ui.theme.ShadcnColor
-import com.retrocam.ui.components.ShadcnInput
 import com.retrocam.ui.components.ShadcnLabel
 import com.retrocam.ui.components.ShadcnSlider
 import com.retrocam.ui.theme.AppType
@@ -86,13 +93,10 @@ import com.retrocam.ui.theme.ShadcnRadius
 @Composable
 fun FilterLabPanel(
     tab: Int,
-    name: String,
     recipe: com.retrocam.catalog.lab.LabRecipe,
     intensity: Float,
     saved: List<SavedRecipe>,
-    canSave: Boolean,
     onTab: (Int) -> Unit,
-    onName: (String) -> Unit,
     onTemplate: (String?) -> Unit,
     onKnob: (Int, Float) -> Unit,
     onResetKnob: (Int) -> Unit,
@@ -139,7 +143,6 @@ fun FilterLabPanel(
     onUse: (String) -> Unit,
     onDeleteSelected: () -> Unit,
     onIntensity: (Float) -> Unit,
-    onSave: () -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -202,67 +205,88 @@ fun FilterLabPanel(
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
         } else {
-            // Every group is driven from the flat LabKnob list, so the display
-            // order and the storage order are two views of one enum rather than
-            // two tables that have to be kept in step.
+            // The six Lightroom-style groups, chosen from a row of icons.
             //
-            // Every group starts OPEN. It used to start closed and expand only
-            // once something in it was off neutral, which is backwards: from a
-            // blank recipe that leaves the Advanced tab showing five collapsed
-            // headers and no controls at all, so building a look from scratch
-            // means nothing is there to drag. The tabs still remember what you
-            // folded away while you work.
-            var collapsed by remember { mutableStateOf(setOf<String>()) }
-            LAB_KNOB_GROUPS.forEach { group ->
-                val indices = group.knobs.mapNotNull { k ->
-                    LabKnob.entries.indexOfFirst { it.label == k.label }.takeIf { it >= 0 }
+            // This replaces eleven stacked "GROUP .... SHOW" rows, one per
+            // section, all collapsed on a blank recipe - so the tab opened on a
+            // list of labels with no controls on it and you had to tap your way
+            // down to find anything. Now there is one row of icons, the group
+            // you picked is the only thing on screen, and every control in it is
+            // immediately visible and draggable.
+            //
+            // Related controls share a group: curves sit with the tone sliders
+            // they modify, the mixer and the 3-way grade sit with the colour
+            // knobs, defringe with the detail pass it belongs to. Six groups is
+            // as many as fit a phone row without the labels going unreadable.
+            var group by remember { mutableStateOf(LabGroup.LIGHT) }
+            GroupRail(group, { group = it }, accent, dim)
+            Spacer(Modifier.height(4.dp))
+            when (group) {
+                LabGroup.LIGHT -> {
+                    KnobSliders(LabKnobGroup.LIGHT, recipe, accent, dim, onKnob, onResetKnob)
+                    GroupLabel("CURVES", dim)
+                    CurveSliders(recipe, accent, dim, onParametric, onClearCurves)
                 }
-                if (indices.isEmpty()) return@forEach
-                val ranges = group.knobs.zip(indices)
-                val anySet = ranges.any { (k, i) -> recipe.knobValue(LabKnob.entries[i]) != k.neutral }
-                val open = group.title !in collapsed
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable { collapsed = collapsed.toggle(group.title) }
-                        .padding(top = 8.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        group.title,
-                        fontFamily = AppType.Sans, fontSize = 10.sp,
-                        color = if (anySet) dim else dim.copy(alpha = 0.55f),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        if (open) "HIDE" else "SHOW",
-                        fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
-                    )
+                LabGroup.COLOR -> {
+                    KnobSliders(LabKnobGroup.COLOR, recipe, accent, dim, onKnob, onResetKnob)
+                    if (recipe.grayscale > 0f) {
+                        GroupLabel("B&W MIX", dim)
+                        BwSliders(recipe, accent, dim, onBw)
+                    }
+                    GroupLabel("COLOR MIX", dim)
+                    HslSliders(recipe, accent, dim, onHsl)
+                    GroupLabel("COLOR GRADING", dim)
+                    GradeSliders(recipe, accent, dim, onGrade)
+                    GroupLabel("CALIBRATION", dim)
+                    CalSliders(recipe, accent, dim, onCal)
                 }
-                if (open) {
-                    ranges.forEach { (k, i) ->
-                        LabSlider(
-                            k.label, recipe.knobValue(LabKnob.entries[i]), k.min, k.max, accent, dim,
-                            { onKnob(i, it) },
-                            neutral = k.neutral,
-                            onReset = { onResetKnob(i) },
+                LabGroup.EFFECTS -> {
+                    KnobSliders(LabKnobGroup.EFFECTS, recipe, accent, dim, onKnob, onResetKnob)
+                    // The stylize effects the Lab had always kept below the
+                    // groups, and the two palettes that drive duotone.
+                    StylizeSliders(recipe, accent, dim, onEffect)
+                    if (recipe.duotone > 0f) {
+                        DuotoneColours(recipe, accent, dim, onDuoColour)
+                    }
+                    if (recipe.splitAmount > 0f) {
+                        GroupLabel("SPLIT TINT", dim)
+                        TintRow("SHADOW", recipe.shadowTint, accent, dim) { onSplitTint(true, it) }
+                        TintRow("HIGHLIGHT", recipe.highlightTint, accent, dim) { onSplitTint(false, it) }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    GroupLabel("PALETTE FROM FRAME", dim)
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ShadcnButton(
+                            text = "Extract",
+                            onClick = onExtractPalette,
+                            variant = ButtonVariant.Outline,
+                            size = ButtonSize.Sm,
                         )
+                        // Only offered once duotone is actually on, because
+                        // applying a colour with duotone at zero changes nothing
+                        // and reads as a dead row of swatches.
+                        if (palette.isNotEmpty() && recipe.duotone > 0f) {
+                            SwatchRow(palette, -1, accent, dim) { onApplyPaletteColour(it, true) }
+                        }
                     }
                 }
+                LabGroup.DETAIL -> {
+                    KnobSliders(LabKnobGroup.DETAIL, recipe, accent, dim, onKnob, onResetKnob)
+                    GroupLabel("DEFRINGE", dim)
+                    DefringeSliders(recipe, accent, dim, onDefringe)
+                }
+                LabGroup.OPTICS -> {
+                    KnobSliders(LabKnobGroup.OPTICS, recipe, accent, dim, onKnob, onResetKnob)
+                }
+                LabGroup.GEOMETRY -> {
+                    GeoControls(recipe, accent, dim, onGeoMode, onKnob, onResetKnob)
+                }
             }
-            // Curves: parametric sliders rebuild the composite run (default
-            // splits), plus per-channel status + clear. Full spline editing is
-            // a whole screen; this is the control set presets actually use.
-            CurvesBlock(recipe, accent, dim, onParametric, onClearCurves)
-            // Color Mixer: 8 bands x H/S/L.
-            HslBlock(recipe, accent, dim, onHsl)
-            // Color Grading 3-way.
-            GradeBlock(recipe, accent, dim, onGrade)
-            // B&W mixer (only when grayscale on) + calibration + defringe + geometry mode.
-            BwBlock(recipe, accent, dim, onBw)
-            CalBlock(recipe, accent, dim, onCal)
-            DefringeBlock(recipe, accent, dim, onDefringe)
-            GeoBlock(recipe, accent, dim, onGeoMode, onKnob, onResetKnob)
+            Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 ShadcnButton(
                     text = "Reset all",
@@ -271,74 +295,6 @@ fun FilterLabPanel(
                     size = ButtonSize.Sm,
                 )
             }
-            if (recipe.splitAmount > 0f) {
-                Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Text("SHADOW TINT", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
-                    SwatchRow(TINT_SWATCHES, recipe.shadowTint, accent, dim) { onSplitTint(true, it) }
-                    Text("HIGHLIGHT TINT", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
-                    SwatchRow(TINT_SWATCHES, recipe.highlightTint, accent, dim) { onSplitTint(false, it) }
-                }
-            }
-
-            Spacer(Modifier.height(4.dp))
-            // VIGNETTE/GRAIN/SHARPEN now live in EFFECTS group above via LabKnob;
-            // only BLUR/GLITCH/DUOTONE remain here to avoid duplicate sliders.
-            Text("EFFECTS (STYLIZE)", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-            listOf(3, 4, 5).forEach { i ->
-                val e = LAB_EFFECTS[i]
-                val v = recipe.effectValue(i)
-                LabSlider(
-                    e.label, v, e.min, e.max, accent, dim,
-                    { onEffect(i, it) },
-                    neutral = 0f,
-                    onReset = { onEffect(i, 0f) },
-                )
-            }
-            if (recipe.duotone > 0f) {
-                DuotoneColours(recipe, accent, dim, onDuoColour)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("PALETTE FROM FRAME", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ShadcnButton(
-                    text = "Extract",
-                    onClick = onExtractPalette,
-                    variant = ButtonVariant.Outline,
-                    size = ButtonSize.Sm,
-                )
-                if (palette.isNotEmpty()) {
-                    SwatchRow(palette, -1, accent, dim) { onApplyPaletteColour(it, true) }
-                }
-            }
-            if (palette.isNotEmpty()) {
-                Text(
-                    "tap a swatch to use it as the duotone shadow",
-                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
-                )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // ---- name + save ----
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ShadcnInput(
-                value = name,
-                onValueChange = onName,
-                placeholder = "Name it",
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(10.dp))
-            ShadcnButton(
-                text = "Save",
-                onClick = onSave,
-                enabled = canSave,
-                variant = if (canSave) ButtonVariant.Default else ButtonVariant.Outline,
-            )
         }
 
         // ---- the bridge: hand the draft to the camera ----
@@ -956,41 +912,144 @@ private fun StageChain(
     }
 }
 
-/** Collapsible section header, matching the knob-group style. */
+/**
+ * The six groups, as icon tiles.
+ *
+ * A group is a category of controls, not a collapsible: picking one shows all
+ * of it. The icon is the whole affordance, which is why the title is short.
+ */
+private enum class LabGroup(val title: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    LIGHT("Light", Icons.Filled.WbSunny),
+    COLOR("Color", Icons.Filled.Palette),
+    EFFECTS("Effects", Icons.Filled.AutoAwesome),
+    DETAIL("Detail", Icons.Filled.Tune),
+    OPTICS("Optics", Icons.Filled.Camera),
+    GEOMETRY("Frame", Icons.Filled.Crop),
+}
+
+/** The horizontal icon rail that picks a group. */
 @Composable
-private fun SectionHeader(
-    title: String,
-    active: Boolean,
+private fun GroupRail(
+    selected: LabGroup,
+    onPick: (LabGroup) -> Unit,
+    accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
-    onToggle: () -> Unit,
-    open: Boolean,
 ) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(top = 8.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp),
     ) {
-        Text(
-            title, fontFamily = AppType.Sans, fontSize = 10.sp,
-            color = if (active) dim else dim.copy(alpha = 0.55f),
-            modifier = Modifier.weight(1f),
-        )
-        Text(if (open) "HIDE" else "SHOW", fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+        items(LabGroup.entries.toList()) { g ->
+            GroupTile(g, g == selected, accent, dim) { onPick(g) }
+        }
     }
 }
 
+/**
+ * One group in the rail: a bordered square holding its icon, with the name
+ * under it.
+ *
+ * Selection is a tint plus a border rather than a filled pill, so the row reads
+ * as six peers you choose between, not as a tab bar with one item highlighted.
+ */
 @Composable
-private fun CurvesBlock(
+private fun GroupTile(
+    group: LabGroup,
+    selected: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(
+        Modifier.width(56.dp).clickable(onClick = onClick).padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(42.dp)
+                .clip(shape)
+                .background(if (selected) accent.copy(alpha = 0.16f) else androidx.compose.ui.graphics.Color.Transparent)
+                .border(1.dp, if (selected) accent else dim.copy(alpha = 0.3f), shape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                group.icon,
+                group.title,
+                tint = if (selected) accent else dim,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            group.title,
+            fontFamily = AppType.Sans,
+            fontSize = 9.sp,
+            color = if (selected) accent else dim,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * A quiet heading inside a group, for the sub-areas that used to be their own
+ * collapsible sections: color mix inside color, curves inside light, defringe
+ * inside detail. A label, not a control - the sub-areas are not hidden any more.
+ */
+@Composable
+private fun GroupLabel(text: String, dim: androidx.compose.ui.graphics.Color) {
+    Text(
+        text,
+        fontFamily = AppType.Sans,
+        fontSize = 10.sp,
+        color = dim.copy(alpha = 0.7f),
+        modifier = Modifier.padding(top = 12.dp, bottom = 2.dp),
+    )
+}
+
+/**
+ * The sliders for one [LabKnobGroup].
+ *
+ * Knobs are matched to their enum entry by label, so the display order in
+ * [com.retrocam.catalog.lab.LabKnobGroup] is the only place a slider's position
+ * is written down.
+ */
+@Composable
+private fun KnobSliders(
+    group: LabKnobGroup,
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onKnob: (Int, Float) -> Unit,
+    onResetKnob: (Int) -> Unit,
+) {
+    group.knobs.forEach { k ->
+        val knob = LabKnob.byLabel(k.label) ?: return@forEach
+        val i = LabKnob.entries.indexOf(knob)
+        LabSlider(
+            k.label, recipe.knobValue(knob), k.min, k.max, accent, dim,
+            { onKnob(i, it) },
+            neutral = k.neutral,
+            onReset = { onResetKnob(i) },
+        )
+    }
+}
+
+/**
+ * Parametric curves. Full spline editing is a screen of its own; the four
+ * sliders are the control set presets actually use, and they rebuild the
+ * composite run.
+ */
+@Composable
+private fun CurveSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onParametric: (Int, Float) -> Unit,
     onClear: () -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
     val group = remember(recipe.toneCurves) { ToneCurve.parseGroup(recipe.toneCurves) }
-    val active = recipe.toneCurveActive
-    SectionHeader("CURVES", active, dim, { open = !open }, open)
-    if (!open) return
     val names = listOf("Composite", "Red", "Green", "Blue")
     group.forEachIndexed { i, ch ->
         Text(
@@ -1009,16 +1068,14 @@ private fun CurvesBlock(
     }
 }
 
+/** Adobe's Color Mixer: eight hue bands x hue / saturation / luminance. */
 @Composable
-private fun HslBlock(
+private fun HslSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onHsl: (Int, Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("COLOR MIX (${if (recipe.hslActive) "on" else "off"})", recipe.hslActive, dim, { open = !open }, open)
-    if (!open) return
     Hsl.BAND_NAMES.forEachIndexed { b, name ->
         Text(name, fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
         listOf("HUE" to 0, "SAT" to 1, "LUM" to 2).forEach { (label, ch) ->
@@ -1028,16 +1085,14 @@ private fun HslBlock(
     }
 }
 
+/** The 3-way colour grade: hue and saturation per range, plus blend and balance. */
 @Composable
-private fun GradeBlock(
+private fun GradeSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onGrade: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("COLOR GRADING", recipe.gradeActive, dim, { open = !open }, open)
-    if (!open) return
     val g = remember(recipe.colorGrade) { recipe.gradeArray() ?: ColorGrade.defaults() }
     val names = listOf("SH HUE", "SH SAT", "MID HUE", "MID SAT", "HI HUE", "HI SAT", "BLEND", "BALANCE")
     names.forEachIndexed { i, label ->
@@ -1048,33 +1103,28 @@ private fun GradeBlock(
     }
 }
 
+/** The channel mix that turns a grayscale image into a toned black and white. */
 @Composable
-private fun BwBlock(
+private fun BwSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onBw: (Int, Float) -> Unit,
 ) {
-    if (recipe.grayscale <= 0f) return
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("B&W MIX", recipe.bwActive, dim, { open = !open }, open)
-    if (!open) return
     val cur = remember(recipe.bwMix) { recipe.bwArray() ?: FloatArray(BwMix.VALUES) }
     Hsl.BAND_NAMES.forEachIndexed { b, name ->
         LabSlider(name, cur[b], -1f, 1f, accent, dim, { onBw(b, it) }, neutral = 0f, onReset = { onBw(b, 0f) })
     }
 }
 
+/** Adobe's Calibration: hue and saturation on each of the three primaries. */
 @Composable
-private fun CalBlock(
+private fun CalSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onCal: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("CALIBRATION", recipe.calibrationActive, dim, { open = !open }, open)
-    if (!open) return
     val parts = remember(recipe.calibration) { recipe.calibrationParts() }
     val h = parts?.first ?: FloatArray(3); val s = parts?.second ?: FloatArray(3)
     listOf("RED HUE" to h[0], "RED SAT" to s[0], "GREEN HUE" to h[1], "GREEN SAT" to s[1], "BLUE HUE" to h[2], "BLUE SAT" to s[2]).forEachIndexed { i, (label, v) ->
@@ -1082,16 +1132,14 @@ private fun CalBlock(
     }
 }
 
+/** Chromatic aberration removal, as two hue ranges with an amount each. */
 @Composable
-private fun DefringeBlock(
+private fun DefringeSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onDefringe: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("DEFRINGE", recipe.defringeActive, dim, { open = !open }, open)
-    if (!open) return
     val cur = remember(recipe.defringe) { recipe.defringeArray() ?: Defringe.defaults() }
     val labels = listOf("PURPLE AMT", "PURPLE LO", "PURPLE HI", "GREEN AMT", "GREEN LO", "GREEN HI")
     labels.forEachIndexed { i, label ->
@@ -1100,8 +1148,9 @@ private fun DefringeBlock(
     }
 }
 
+/** Geometry: the mode presets on top, the seven manual corrections below. */
 @Composable
-private fun GeoBlock(
+private fun GeoControls(
     recipe: com.retrocam.catalog.lab.LabRecipe,
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
@@ -1109,9 +1158,6 @@ private fun GeoBlock(
     onKnob: (Int, Float) -> Unit,
     onResetKnob: (Int) -> Unit,
 ) {
-    var open by remember { mutableStateOf(true) }
-    SectionHeader("GEOMETRY", recipe.geoActive, dim, { open = !open }, open)
-    if (!open) return
     val cur = remember(recipe.geometry) { recipe.geoArray() ?: Geometry.defaults() }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Geometry.MODE_NAMES.forEachIndexed { i, m ->
@@ -1135,6 +1181,44 @@ private fun GeoBlock(
     }
     Text("Auto levels tilt, Guided sets manual lines (sliders), Full corrects both axes.",
         fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+}
+
+/** The stylize effects: blur, glitch, duotone. The rest of the effects are knobs. */
+@Composable
+private fun StylizeSliders(
+    recipe: com.retrocam.catalog.lab.LabRecipe,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onEffect: (Int, Float) -> Unit,
+) {
+    listOf(3, 4, 5).forEach { i ->
+        val e = LAB_EFFECTS[i]
+        LabSlider(
+            e.label, recipe.effectValue(i), e.min, e.max, accent, dim,
+            { onEffect(i, it) },
+            neutral = 0f,
+            onReset = { onEffect(i, 0f) },
+        )
+    }
+}
+
+/**
+ * A named row of tint swatches.
+ *
+ * Two bare swatch rows stacked are indistinguishable from each other, and which
+ * one is which only becomes obvious after you have already applied a colour to
+ * the wrong end of the tone curve.
+ */
+@Composable
+private fun TintRow(
+    label: String,
+    current: Int,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onPick: (Int) -> Unit,
+) {
+    Text(label, fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
+    SwatchRow(TINT_SWATCHES, current, accent, dim, onPick)
 }
 
 /**
