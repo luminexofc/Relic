@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Send
@@ -127,6 +128,7 @@ fun FilterLabPanel(
     selectedStage: Int,
     onSelectStage: (Int) -> Unit,
     onShare: (String) -> Unit,
+    onExportXmp: (String) -> Unit,
     onImportQr: () -> Unit,
     xmpReport: com.retrocam.catalog.lab.XmpResult?,
     onImportXmp: () -> Unit,
@@ -425,6 +427,20 @@ fun FilterLabPanel(
                                     Icons.Filled.QrCode,
                                     "Share ${r.name} as QR",
                                     tint = ShadcnColor.Primary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            },
+                        )
+                        ShadcnButton(
+                            onClick = { onExportXmp(r.id) },
+                            variant = ButtonVariant.Ghost,
+                            size = ButtonSize.Icon,
+                            modifier = Modifier.size(30.dp),
+                            leading = {
+                                Icon(
+                                    Icons.Filled.Description,
+                                    "Save ${r.name} as XMP",
+                                    tint = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.size(16.dp),
                                 )
                             },

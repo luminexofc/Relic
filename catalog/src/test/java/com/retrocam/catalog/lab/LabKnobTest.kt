@@ -62,7 +62,20 @@ class LabKnobTest {
         // that fell through to a shared branch would move several at once, and
         // that is invisible unless it is checked.
         // EXPOSURE and GAMMA share the gamma field by design (EV vs gamma views).
-        val aliases = setOf(LabKnob.EXPOSURE to LabKnob.GAMMA, LabKnob.GAMMA to LabKnob.EXPOSURE)
+        // The rest are the auto-arm pairs: a dependent slider switches its
+        // master amount on, so it moves two fields on purpose.
+        val aliases = setOf(
+            LabKnob.EXPOSURE to LabKnob.GAMMA, LabKnob.GAMMA to LabKnob.EXPOSURE,
+            LabKnob.SHARP_RADIUS to LabKnob.SHARPEN_AMT,
+            LabKnob.MASKING to LabKnob.SHARPEN_AMT,
+            LabKnob.GRAIN_SIZE to LabKnob.GRAIN_AMT,
+            LabKnob.GRAIN_ROUGH to LabKnob.GRAIN_AMT,
+            LabKnob.VIG_MIDPOINT to LabKnob.VIGNETTE_AMT,
+            LabKnob.VIG_FEATHER to LabKnob.VIGNETTE_AMT,
+            LabKnob.VIG_ROUND to LabKnob.VIGNETTE_AMT,
+            LabKnob.VIG_ASPECT to LabKnob.VIGNETTE_AMT,
+            LabKnob.LENS_FOCUS to LabKnob.LENS_BLUR,
+        )
         LabKnob.entries.forEach { target ->
             val base = LabRecipe()
             val moved = base.withKnob(target, testValue(target))
@@ -133,6 +146,45 @@ class LabKnobTest {
                 }
             }
         }
+    }
+
+    /**
+     * A dependent slider switches its master on, so building from scratch
+     * works without an XMP import setting the amounts first. Before this,
+     * grain size with grain at 0 (and the same for vignette shape, sharp
+     * radius/masking, lens focus) did nothing at all, which is the "advanced
+     * sliders only work after an import" report.
+     */
+    @Test
+    fun `dependent sliders arm their master amount`() {
+        assertEquals(0.5f, LabRecipe().withKnob(LabKnob.GRAIN_SIZE, 2f).grain, 0f)
+        assertEquals(0.5f, LabRecipe().withKnob(LabKnob.GRAIN_ROUGH, 0.8f).grain, 0f)
+        assertEquals(0.5f, LabRecipe().withKnob(LabKnob.VIG_MIDPOINT, 0.7f).vignette, 0f)
+        assertEquals(0.5f, LabRecipe().withKnob(LabKnob.VIG_ROUND, 0.7f).vignette, 0f)
+        assertEquals(0.45f, LabRecipe().withKnob(LabKnob.SHARP_RADIUS, 2f).sharpen, 1e-4f)
+        assertEquals(0.45f, LabRecipe().withKnob(LabKnob.MASKING, 0.5f).sharpen, 1e-4f)
+        assertEquals(0.5f, LabRecipe().withKnob(LabKnob.LENS_FOCUS, 0.7f).lensBlur, 0f)
+        // Touching a neutral value arms nothing: a no-op drag must stay a no-op.
+        assertEquals(0f, LabRecipe().withKnob(LabKnob.GRAIN_SIZE, 1f).grain, 0f)
+        assertEquals(0f, LabRecipe().withKnob(LabKnob.VIG_MIDPOINT, 0.5f).vignette, 0f)
+        // And an already-on master is left alone, not reset to the default.
+        assertEquals(0.8f, LabRecipe(grain = 0.8f).withKnob(LabKnob.GRAIN_SIZE, 2f).grain, 0f)
+    }
+
+    @Test
+    fun `a grade hue arms its saturation and sticks`() {
+        val r = LabRecipe().withGrade(0, 0.3f)
+        assertEquals(0.3f, r.gradeArray()!![0], 1e-4f)
+        assertEquals(0.5f, r.gradeArray()!![1], 1e-4f)
+        assertTrue(r.gradeActive)
+    }
+
+    @Test
+    fun `a defringe range arms its amount and sticks`() {
+        val r = LabRecipe().withDefringe(1, 0.8f)
+        assertEquals(0.8f, r.defringeArray()!![1], 1e-4f)
+        assertEquals(0.5f, r.defringeArray()!![0], 1e-4f)
+        assertTrue(r.defringeActive)
     }
 
     /** Every knob the importer can set has somewhere to put it. */

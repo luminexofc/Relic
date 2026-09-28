@@ -30,10 +30,12 @@ object ColorGrade {
 
     fun isActive(v: FloatArray?): Boolean {
         if (v == null || v.size != VALUES) return false
+        // Any hue or saturation set means a grade (withGrade arms the matching
+        // saturation, so a hue never travels alone from the UI, but a
+        // hand-written field can still carry one and it must survive).
+        for (i in 0..5) if (v[i] != 0f) return true
         // Blend neutral is 0.5, balance neutral is 0.
-        if (v[1] != 0f || v[3] != 0f || v[5] != 0f) return true
         if (v[6] != 0.5f || v[7] != 0f) return true
-        // Hue alone does nothing without saturation.
         return false
     }
 

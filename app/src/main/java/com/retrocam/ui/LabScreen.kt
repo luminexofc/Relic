@@ -127,6 +127,15 @@ fun LabScreen(viewModel: CameraViewModel) {
     val xmpPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importXmp(uri)
     }
+    // Exporting a curated preset as a shareable .xmp file. The pending id is
+    // needed because CreateDocument's callback only hands back the uri.
+    var xmpExportId by remember { mutableStateOf<String?>(null) }
+    val xmpExportPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri ->
+            val id = xmpExportId
+            xmpExportId = null
+            if (id != null && uri != null) viewModel.exportXmp(id, uri)
+        }
 
     // The Lab's own renderer, not the camera's. syncRenderer is what tells the
     // ViewModel which GL pipeline is live, so overlay uploads land on the
@@ -328,6 +337,11 @@ fun LabScreen(viewModel: CameraViewModel) {
             selectedStage = stageIndex,
             onSelectStage = { selectedStage = it },
             onShare = viewModel::shareRecipe,
+            onExportXmp = { id ->
+                xmpExportId = id
+                val nm = state.labRecipes.firstOrNull { it.id == id }?.name ?: "PRESET"
+                xmpExportPicker.launch("$nm.xmp")
+            },
             onImportQr = { qrPicker.launch("image/*") },
             xmpReport = state.xmpReport,
             onImportXmp = { xmpPicker.launch("*/*") },

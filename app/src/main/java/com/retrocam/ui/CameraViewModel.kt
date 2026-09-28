@@ -291,6 +291,24 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
+     * Writes a saved recipe out as a Lightroom `.xmp` preset.
+     *
+     * Called with the uri from a CreateDocument picker, so the user chooses
+     * where the file goes. A curated preset built from scratch leaves the app
+     * as a file Lightroom understands — the other half of import.
+     */
+    fun exportXmp(id: String, uri: android.net.Uri) {
+        val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
+        val doc = com.retrocam.catalog.lab.XmpExport.export(r.lab, r.name)
+        val ok = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(doc.toByteArray())
+            } ?: throw IllegalStateException("no stream")
+        }.isSuccess
+        if (ok) Feedback.info(context, "XMP saved") else Feedback.error(context)
+    }
+
+    /**
      * Imports a recipe from a QR in [uri] and adds it to the strip.
      *
      * Re-importing something already present is a no-op, because the recipe id is

@@ -325,22 +325,55 @@ fun LabRecipe.withKnob(k: LabKnob, value: Float): LabRecipe {
         LabKnob.SHARPEN_AMT -> copy(sharpen = c(0f, 1f))
         LabKnob.GRAYSCALE -> copy(grayscale = c(0f, 1f))
         LabKnob.VIBRANCE -> copy(vibrance = c(-1f, 1f))
-        LabKnob.SHARP_RADIUS -> copy(sharpRadius = c(0.5f, 3f))
+        // Dependent sliders auto-arm their master amount: radius/masking with
+        // sharpening at 0, grain size with grain at 0, vignette shape with
+        // vignette at 0 are all dead otherwise, which is exactly the "sliders
+        // do nothing from scratch" report. Adobe sidesteps this by defaulting
+        // Sharpening to 40; here the default stays 0 (neutral is neutral) and
+        // the first drag switches it on instead.
+        LabKnob.SHARP_RADIUS -> copy(
+            sharpRadius = c(0.5f, 3f),
+            sharpen = if (sharpen == 0f && detail == 0f && c(0.5f, 3f) != 1f) 0.45f else sharpen,
+        )
         LabKnob.DETAIL -> copy(detail = c(0f, 1f))
-        LabKnob.MASKING -> copy(masking = c(0f, 1f))
+        LabKnob.MASKING -> copy(
+            masking = c(0f, 1f),
+            sharpen = if (sharpen == 0f && detail == 0f && c(0f, 1f) != 0f) 0.45f else sharpen,
+        )
         LabKnob.DENOISE_LUM -> copy(denoiseLum = c(0f, 1f))
         LabKnob.DENOISE_COLOR -> copy(denoiseColor = c(0f, 1f))
-        LabKnob.GRAIN_SIZE -> copy(grainSize = c(0.5f, 3f))
-        LabKnob.GRAIN_ROUGH -> copy(grainRough = c(0f, 1f))
-        LabKnob.VIG_MIDPOINT -> copy(vigMidpoint = c(0f, 1f))
-        LabKnob.VIG_FEATHER -> copy(vigFeather = c(0f, 1f))
-        LabKnob.VIG_ROUND -> copy(vigRound = c(0f, 1f))
-        LabKnob.VIG_ASPECT -> copy(vigAspect = c(0f, 1f))
+        LabKnob.GRAIN_SIZE -> copy(
+            grainSize = c(0.5f, 3f),
+            grain = if (grain == 0f && c(0.5f, 3f) != 1f) 0.5f else grain,
+        )
+        LabKnob.GRAIN_ROUGH -> copy(
+            grainRough = c(0f, 1f),
+            grain = if (grain == 0f && c(0f, 1f) != 0.5f) 0.5f else grain,
+        )
+        LabKnob.VIG_MIDPOINT -> copy(
+            vigMidpoint = c(0f, 1f),
+            vignette = if (vignette == 0f && c(0f, 1f) != 0.5f) 0.5f else vignette,
+        )
+        LabKnob.VIG_FEATHER -> copy(
+            vigFeather = c(0f, 1f),
+            vignette = if (vignette == 0f && c(0f, 1f) != 0.5f) 0.5f else vignette,
+        )
+        LabKnob.VIG_ROUND -> copy(
+            vigRound = c(0f, 1f),
+            vignette = if (vignette == 0f && c(0f, 1f) != 0.5f) 0.5f else vignette,
+        )
+        LabKnob.VIG_ASPECT -> copy(
+            vigAspect = c(0f, 1f),
+            vignette = if (vignette == 0f && c(0f, 1f) != 0.5f) 0.5f else vignette,
+        )
         LabKnob.LENS_CA -> copy(lensCA = if (c(0f, 1f) > 0.5f) 1f else 0f)
         LabKnob.LENS_ENABLE -> copy(lensEnable = if (c(0f, 1f) > 0.5f) 1f else 0f)
         LabKnob.LENS_DISTORT -> copy(lensDistort = c(-1f, 1f))
         LabKnob.LENS_BLUR -> copy(lensBlur = c(0f, 1f))
-        LabKnob.LENS_FOCUS -> copy(lensFocus = c(0f, 1f))
+        LabKnob.LENS_FOCUS -> copy(
+            lensFocus = c(0f, 1f),
+            lensBlur = if (lensBlur == 0f && c(0f, 1f) != 0.5f) 0.5f else lensBlur,
+        )
         LabKnob.GEO_VERTICAL -> withGeo(1, c(-1f, 1f))
         LabKnob.GEO_HORIZONTAL -> withGeo(2, c(-1f, 1f))
         LabKnob.GEO_ROTATE -> withGeo(3, c(-1f, 1f))
@@ -369,7 +402,13 @@ fun LabRecipe.withHsl(band: Int, ch: Int, v: Float): LabRecipe {
 fun LabRecipe.hslBand(band: Int, ch: Int): Float =
     hslArray()?.getOrNull(band * 3 + ch) ?: 0f
 
-/** Copy with color-grade slot set. */
+/**
+ * Copy with color-grade slot set.
+ *
+ * A hue with its saturation at 0 is invisible AND un-storable (the encoder
+ * drops a sat-less grade as inactive), so setting a hue arms its saturation
+ * to 0.5. Same auto-arm rule as the scalar dependents above.
+ */
 fun LabRecipe.withGrade(slot: Int, v: Float): LabRecipe {
     val cur = gradeArray() ?: ColorGrade.defaults()
     val next = cur.copyOf()
@@ -378,6 +417,9 @@ fun LabRecipe.withGrade(slot: Int, v: Float): LabRecipe {
         1, 3, 5 -> v.coerceIn(0f, 1f)
         6 -> v.coerceIn(0f, 1f)
         else -> v.coerceIn(-1f, 1f)
+    }
+    if (slot % 2 == 0 && slot < 6 && next[slot] != 0f && next[slot + 1] == 0f) {
+        next[slot + 1] = 0.5f
     }
     return copy(colorGrade = ColorGrade.encode(next))
 }
@@ -399,11 +441,18 @@ fun LabRecipe.withCal(slot: Int, v: Float): LabRecipe {
     return copy(calibration = Calibration.encode(nh, ns))
 }
 
-/** Copy with defringe slot set. */
+/**
+ * Copy with defringe slot set.
+ *
+ * Hue ranges with both amounts at 0 are invisible AND un-storable, so moving
+ * a range arms its amount to 0.5. Slots 0/3 are the amounts themselves.
+ */
 fun LabRecipe.withDefringe(slot: Int, v: Float): LabRecipe {
     val cur = defringeArray() ?: Defringe.defaults()
     val next = cur.copyOf()
     next[slot] = v.coerceIn(0f, 1f)
+    if (slot in 1..2 && next[0] == 0f && v != Defringe.defaults()[slot]) next[0] = 0.5f
+    if (slot in 4..5 && next[3] == 0f && v != Defringe.defaults()[slot]) next[3] = 0.5f
     return copy(defringe = Defringe.encode(next))
 }
 
