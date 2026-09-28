@@ -67,6 +67,16 @@ import com.retrocam.ui.theme.AppType
 import com.retrocam.ui.theme.ShadcnRadius
 
 /**
+ * Icon size for the header's action buttons.
+ *
+ * Bigger than Material's 24dp default on purpose. These are the only controls
+ * in the top bar and they sit on a black background, where a thin 24dp glyph
+ * has very little to contrast against; at 22dp with a wider gap between the two
+ * actions they are legible at arm's length, which is how a camera is held.
+ */
+private val HEADER_ICON = 22.dp
+
+/**
  * The Filter Lab, as a screen of its own.
  *
  * It owns a second [FilterRenderer] and its own [GLSurfaceView], so it is a
@@ -211,6 +221,7 @@ fun LabScreen(viewModel: CameraViewModel) {
                         Icons.Filled.ArrowBack,
                         "Back to camera",
                         tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(HEADER_ICON),
                     )
                 },
             )
@@ -237,9 +248,15 @@ fun LabScreen(viewModel: CameraViewModel) {
                         "Save this look",
                         tint = if (canSave) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+                        modifier = Modifier.size(HEADER_ICON),
                     )
                 },
             )
+            // A real gap, not the 0dp padding a bare icon button uses. Save and
+            // flip are two different actions on opposite sides of the screen's
+            // purpose, and with nothing between them the save icon reads as part
+            // of the flip control.
+            Spacer(Modifier.width(14.dp))
             ShadcnButton(
                 onClick = { viewModel.flipCamera() },
                 variant = ButtonVariant.Ghost,
@@ -249,6 +266,7 @@ fun LabScreen(viewModel: CameraViewModel) {
                         Icons.Filled.Autorenew,
                         "Flip camera",
                         tint = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.size(HEADER_ICON),
                     )
                 },
             )

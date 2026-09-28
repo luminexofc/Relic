@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -1068,7 +1069,20 @@ private fun CurveSliders(
     }
 }
 
-/** Adobe's Color Mixer: eight hue bands x hue / saturation / luminance. */
+/**
+ * Adobe's Color Mixer, one band at a time.
+ *
+ * All eight bands times three channels is 24 sliders: a screen and a half of
+ * near-identical rows whose only difference is a small capital letter at the
+ * start of each label. Choosing the band first and then showing its three
+ * channels turns that wall into a row of eight names and three sliders.
+ *
+ * A dot marks any band the recipe has actually moved, so the picker also
+ * answers "which colours did this preset change" before you go looking. It
+ * opens on the first band that was touched, so an imported look does not land
+ * you on a Red that was never adjusted.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun HslSliders(
     recipe: com.retrocam.catalog.lab.LabRecipe,
@@ -1076,12 +1090,64 @@ private fun HslSliders(
     dim: androidx.compose.ui.graphics.Color,
     onHsl: (Int, Int, Float) -> Unit,
 ) {
-    Hsl.BAND_NAMES.forEachIndexed { b, name ->
-        Text(name, fontFamily = AppType.Sans, fontSize = 9.sp, color = dim)
-        listOf("HUE" to 0, "SAT" to 1, "LUM" to 2).forEach { (label, ch) ->
-            LabSlider("$name $label", recipe.hslBand(b, ch), -1f, 1f, accent, dim, { onHsl(b, ch, it) }, neutral = 0f,
-                onReset = { onHsl(b, ch, 0f) })
+    // Deliberately not keyed on recipe.hsl: this would re-run on every drag and
+    // could jump the selection to a different band mid-adjustment.
+    val firstMoved = (0 until Hsl.BANDS).firstOrNull { b ->
+        (0..2).any { ch -> recipe.hslBand(b, ch) != 0f }
+    } ?: 0
+    var band by remember { mutableStateOf(firstMoved) }
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Hsl.BAND_NAMES.forEachIndexed { b, name ->
+            val moved = (0..2).any { ch -> recipe.hslBand(b, ch) != 0f }
+            BandChip(name, b == band, moved, accent, dim) { band = b }
         }
+    }
+    Spacer(Modifier.height(4.dp))
+    val name = Hsl.BAND_NAMES[band]
+    listOf("HUE" to 0, "SAT" to 1, "LUM" to 2).forEach { (label, ch) ->
+        LabSlider("$name $label", recipe.hslBand(band, ch), -1f, 1f, accent, dim,
+            { onHsl(band, ch, it) }, neutral = 0f, onReset = { onHsl(band, ch, 0f) })
+    }
+}
+
+/**
+ * One hue band in the mixer picker.
+ *
+ * The dot is the point of this control over a plain list of names: it shows
+ * which colours are off neutral without opening them, so an imported preset's
+ * colour mixer is visible in one glance instead of twenty-four rows of reading.
+ */
+@Composable
+private fun BandChip(
+    label: String,
+    selected: Boolean,
+    moved: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier
+            .border(1.dp, if (selected) accent else dim.copy(alpha = 0.35f), RoundedCornerShape(50))
+            .background(if (selected) accent.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (moved) {
+            Box(Modifier.size(5.dp).clip(CircleShape).background(if (selected) accent else dim))
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(
+            label,
+            fontFamily = AppType.Sans,
+            fontSize = 10.sp,
+            color = if (selected) accent else dim,
+        )
     }
 }
 
