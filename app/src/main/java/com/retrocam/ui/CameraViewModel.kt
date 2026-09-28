@@ -18,7 +18,6 @@ import com.retrocam.catalog.lab.LabMask
 import com.retrocam.catalog.lab.LabRecipe
 import com.retrocam.catalog.lab.LabPrimitives
 import com.retrocam.catalog.lab.LabStage
-import com.retrocam.catalog.lab.MaskShape
 import com.retrocam.catalog.lab.neutral
 import com.retrocam.catalog.lab.withBw
 import com.retrocam.catalog.lab.withCal
@@ -907,26 +906,6 @@ class CameraViewModel @Inject constructor(
                 width = kotlin.math.abs(x1 - x0), height = kotlin.math.abs(y1 - y0),
             ),
         )
-    }
-
-    fun cycleLabStageMaskShape(index: Int) {
-        pendingSelectedRecipe = null
-        withStages(index) { cur ->
-            cur.mapIndexed { i, st ->
-                if (i != index) {
-                    st
-                } else {
-                    // Cycling rather than a list, so the control is one button.
-                    val next = MaskShape.entries[(st.mask.shape.ordinal + 1) % MaskShape.entries.size]
-                    st.copy(mask = st.mask.copy(shape = next))
-                }
-            }
-        }
-    }
-
-    fun setLabStageFeather(index: Int, feather: Float) {
-        val st = _uiState.value.labRecipe.stages.getOrNull(index) ?: return
-        setLabStageMask(index, st.mask.copy(feather = feather.coerceIn(0f, 1f)))
     }
 
     fun clearLabStages() {

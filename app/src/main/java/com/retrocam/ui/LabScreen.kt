@@ -203,7 +203,12 @@ fun LabScreen(viewModel: CameraViewModel) {
 
     BackHandler { viewModel.closeLab() }
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // A Box so the name dialog is an overlay on the whole screen rather than a
+    // layout child. Inside the Column it was laid out below the panel and
+    // scrolled with it, so tapping Save pushed a name field into the middle of
+    // the Basic tab instead of appearing over the top.
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // ---- header ----
         Row(
             Modifier
@@ -371,8 +376,6 @@ fun LabScreen(viewModel: CameraViewModel) {
             onStageAmount = viewModel::setLabStageAmount,
             onStageParam = viewModel::setLabStageParam,
             onStageParamReset = viewModel::resetLabStageParam,
-            onStageMaskShape = viewModel::cycleLabStageMaskShape,
-            onStageFeather = viewModel::setLabStageFeather,
             onStageMaskDrag = viewModel::setLabStageMaskFromDrag,
             onClearStages = viewModel::clearLabStages,
             selectedStage = stageIndex,
@@ -401,7 +404,8 @@ fun LabScreen(viewModel: CameraViewModel) {
             onIntensity = viewModel::setLabIntensity,
             onEdit = viewModel::editLabRecipe,
             onDelete = viewModel::deleteLabRecipe,
-        )
+            )
+        }
 
         // The name is only ever asked for at the moment of saving, so the panel
         // has no text field in it at all while you are adjusting sliders.

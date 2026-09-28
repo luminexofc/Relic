@@ -123,8 +123,6 @@ fun FilterLabPanel(
     onStageAmount: (Int, Float) -> Unit,
     onStageParam: (Int, Int, Float) -> Unit,
     onStageParamReset: (Int, Int) -> Unit,
-    onStageMaskShape: (Int) -> Unit,
-    onStageFeather: (Int, Float) -> Unit,
     onStageMaskDrag: (Int, Float, Float, Float, Float) -> Unit,
     onClearStages: () -> Unit,
     selectedStage: Int,
@@ -179,8 +177,6 @@ fun FilterLabPanel(
                 onAmount = onStageAmount,
                 onParam = onStageParam,
                 onParamReset = onStageParamReset,
-                onMaskShape = onStageMaskShape,
-                onFeather = onStageFeather,
                 onMaskDrag = onStageMaskDrag,
                 onClear = onClearStages,
                 selected = selectedStage,
@@ -759,8 +755,6 @@ private fun StageChain(
     onAmount: (Int, Float) -> Unit,
     onParam: (Int, Int, Float) -> Unit,
     onParamReset: (Int, Int) -> Unit,
-    onMaskShape: (Int) -> Unit,
-    onFeather: (Int, Float) -> Unit,
     onMaskDrag: (Int, Float, Float, Float, Float) -> Unit,
     onClear: () -> Unit,
     selected: Int,
@@ -853,28 +847,6 @@ private fun StageChain(
                         "reset to default to reveal",
                     fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
                 )
-            }
-
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "AREA",
-                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
-                )
-                Spacer(Modifier.width(6.dp))
-                ShadcnButton(
-                    text = if (stage.maskClamped.isFull) "FULL FRAME" else stage.maskClamped.shape.name,
-                    onClick = { onMaskShape(index) },
-                    variant = ButtonVariant.Outline,
-                    size = ButtonSize.Sm,
-                )
-                Spacer(Modifier.width(6.dp))
-                if (!stage.maskClamped.isFull) {
-                    LabSlider(
-                        "FEATHER", stage.maskClamped.feather, 0f, 1f, accent, dim,
-                        { onFeather(index, it) },
-                    )
-                }
             }
 
             Spacer(Modifier.height(4.dp))
