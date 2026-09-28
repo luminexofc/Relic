@@ -56,6 +56,64 @@ class LabKnobTest {
         }
     }
 
+    /**
+     * Every slider, moved on a blank recipe, must survive the renderer's own gate.
+     *
+     * This is the "sliders do nothing from scratch" test. The renderer skips the
+     * whole grade pass when `isIdentity` says the recipe renders nothing, so a
+     * knob that stores correctly but is not counted there is a control the user
+     * can drag with no result whatsoever - no picture change, no error, and the
+     * same slider looks fine once a preset happens to set something else. EXPOSURE
+     * was broken that way: `isIdentity` was a hand-written list, `gamma` was never
+     * on it, so a recipe whose only change was exposure reported itself blank and
+     * the entire grade pass was skipped.
+     *
+     * `isIdentity` is now the data class's own equality, so a new field cannot go
+     * missing again. This test is what keeps that claim honest by walking every
+     * knob rather than the handful someone remembered.
+     */
+    @Test
+    fun `every knob off neutral escapes the identity gate`() {
+        val blank = LabRecipe()
+        assertTrue("a blank recipe must be identity", blank.isIdentity)
+        for (k in LabKnob.entries) {
+            val r = blank.withKnob(k, testValue(k))
+            assertTrue(
+                "$k is stored but still reports identity, so the grade pass is dropped",
+                !r.isIdentity,
+            )
+        }
+    }
+
+    /**
+     * A packed field that is present but neutral must still count as identity.
+     *
+     * The decoder writes `hsl` as a string of zeroes rather than leaving it
+     * absent, so comparing the packed fields verbatim would call a recipe with
+     * the colour mixer explicitly off non-identity and put the renderer into a
+     * pass that changes nothing. Each packed field is normalised through its own
+     * is-active test before the comparison for exactly this reason.
+     */
+    @Test
+    fun `an explicitly neutral packed field is still identity`() {
+        val off = LabRecipe(
+            hsl = Hsl.encode(FloatArray(Hsl.VALUES)),
+            colorGrade = ColorGrade.encode(ColorGrade.defaults()),
+            bwMix = BwMix.encode(FloatArray(BwMix.VALUES)),
+            defringe = Defringe.encode(Defringe.defaults()),
+            geometry = Geometry.encode(Geometry.defaults()),
+        )
+        assertTrue(!off.hslActive)
+        assertTrue(!off.gradeActive)
+        assertTrue(!off.bwActive)
+        assertTrue(!off.geoActive)
+        assertTrue("a neutral packed field must not cost a render pass", off.isIdentity)
+        // And the moment one of them is genuinely off, the pass has to come back.
+        assertTrue(!off.withHsl(0, 0, 0.4f).isIdentity)
+        assertTrue(!off.withGrade(0, 0.3f).isIdentity)
+        assertTrue(!off.withBw(0, -0.3f).isIdentity)
+    }
+
     @Test
     fun `setting a knob leaves every other knob alone`() {
         // The property that a single slider actually moves one control. A `when`

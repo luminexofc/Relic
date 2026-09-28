@@ -335,6 +335,9 @@ fun LabRecipe.withKnob(k: LabKnob, value: Float): LabRecipe {
             sharpRadius = c(0.5f, 3f),
             sharpen = if (sharpen == 0f && detail == 0f && c(0.5f, 3f) != 1f) 0.45f else sharpen,
         )
+        // No master to arm: the shader runs the detail unsharp on its own
+        // (`u_sharpen > 0.0 || u_detail > 0.0`), so this is a first-class control
+        // and switching sharpening on behind the user's back would be wrong.
         LabKnob.DETAIL -> copy(detail = c(0f, 1f))
         LabKnob.MASKING -> copy(
             masking = c(0f, 1f),

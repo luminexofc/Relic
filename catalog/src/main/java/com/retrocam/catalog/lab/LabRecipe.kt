@@ -232,20 +232,55 @@ data class LabRecipe(
     fun geoArray(): FloatArray? = Geometry.parse(geometry)
     val geoActive: Boolean get() = Geometry.isActive(geoArray())
 
-    /** True when any grading or any effect is actually doing something. */
+    /**
+     * True when the recipe would render nothing, so the grade pass can be skipped.
+     *
+     * This used to be a hand-written list of twenty conditions, and it was
+     * wrong in the way hand-written lists always are: it never mentioned
+     * `gamma`, so a recipe whose only change was EXPOSURE reported itself
+     * identical, the renderer dropped the grade pass, and the exposure slider
+     * did nothing at all from scratch. The same happened to `detail`,
+     * `sharpRadius`, `grainSize`, `grainRough`, `vigMidpoint`, `vigFeather`,
+     * `lensFocus` and `splitAmount` - it was a list, and fields were added
+     * without going back to it.
+     *
+     * So it is now derived from the data class's own equality instead: a recipe
+     * is identity exactly when it equals a fresh one. Adding a field to
+     * [LabRecipe] now adds it here automatically, which is the whole point -
+     * the failure mode cannot come back, because there is no list to forget to
+     * update.
+     *
+     * The one wrinkle is the packed fields. A recipe decoded from a saved
+     * payload can carry `hsl` as a string of zeroes rather than [Hsl.NONE], and
+     * that renders nothing while differing from the default. Each packed field
+     * is therefore normalised through its own is-active test first, so the
+     * comparison sees what the shader would actually see.
+     *
+     * That normalisation allocates, and this runs in the render loop, so the
+     * common case short-circuits: if no packed field is set at all then none of
+     * them can be active, and the comparison can be made against this instance
+     * directly. From a blank recipe, which is the case a slider drag is in, that
+     * is every frame.
+     */
     val isIdentity: Boolean
-        get() = templateId == null && adjustments.isNeutral && !hasEffects &&
-            stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive &&
-            !hslActive && grayscale == 0f && !calibrationActive &&
-            vibrance == 0f && !gradeActive && !bwActive &&
-            denoiseLum == 0f && denoiseColor == 0f && !defringeActive &&
-            lensEnable == 0f && lensDistort == 0f && lensBlur == 0f && !geoActive &&
-            vigRound == 0.5f && vigAspect == 0.5f
+        get() = if (noPackedFieldSet) this == NEUTRAL_RECIPE else normalisingPacked() == NEUTRAL_RECIPE
 
-    /** True when at least one effect stage is active. */
-    val hasEffects: Boolean
-        get() = vignette > 0f || grain > 0f || sharpen > 0f || blur > 0f ||
-            glitch > 0f || duotone > 0f
+    /** True when every packed field is at its NONE sentinel, so none is active. */
+    private val noPackedFieldSet: Boolean
+        get() = hsl == Hsl.NONE && colorGrade == ColorGrade.NONE && bwMix == BwMix.NONE &&
+            calibration == Calibration.NONE && defringe == Defringe.NONE &&
+            geometry == Geometry.NONE && toneCurves == ToneCurve.NONE
+
+    /** [copy] with every packed field that would render nothing put back to NONE. */
+    private fun normalisingPacked(): LabRecipe = copy(
+        hsl = if (hslActive) hsl else Hsl.NONE,
+        colorGrade = if (gradeActive) colorGrade else ColorGrade.NONE,
+        bwMix = if (bwActive) bwMix else BwMix.NONE,
+        calibration = if (calibrationActive) calibration else Calibration.NONE,
+        defringe = if (Defringe.isActive(defringeArray())) defringe else Defringe.NONE,
+        geometry = if (geoActive) geometry else Geometry.NONE,
+        toneCurves = if (toneCurveActive) toneCurves else ToneCurve.NONE,
+    )
 
     /** Names of the active effects, for the summary line in the UI. */
     fun activeEffects(): List<String> = buildList {
@@ -288,6 +323,17 @@ data class LabRecipe(
     }
 
     companion object {
+        /**
+         * A recipe that renders nothing, built once.
+         *
+         * The identity of [isIdentity] compares against this, so it has to be
+         * the same object every call rather than a fresh `LabRecipe()` per
+         * frame: `isIdentity` is read on the GL thread once per frame, and
+         * rebuilding the whole default each time would be the most expensive
+         * thing in the draw loop.
+         */
+        val NEUTRAL_RECIPE = LabRecipe()
+
         /**
          * Hard cap on chain length. Enforced in the recipe, the codec and the UI
          * rather than in one place, because a cap that only the UI respects is not

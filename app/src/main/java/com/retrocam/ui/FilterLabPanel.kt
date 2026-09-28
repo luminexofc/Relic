@@ -204,10 +204,15 @@ fun FilterLabPanel(
         } else {
             // Every group is driven from the flat LabKnob list, so the display
             // order and the storage order are two views of one enum rather than
-            // two tables that have to be kept in step. A group the preset has
-            // touched expands itself, because that is the group the user came
-            // here to check; one the preset left alone stays closed.
-            var openGroups by remember { mutableStateOf(setOf<String>()) }
+            // two tables that have to be kept in step.
+            //
+            // Every group starts OPEN. It used to start closed and expand only
+            // once something in it was off neutral, which is backwards: from a
+            // blank recipe that leaves the Advanced tab showing five collapsed
+            // headers and no controls at all, so building a look from scratch
+            // means nothing is there to drag. The tabs still remember what you
+            // folded away while you work.
+            var collapsed by remember { mutableStateOf(setOf<String>()) }
             LAB_KNOB_GROUPS.forEach { group ->
                 val indices = group.knobs.mapNotNull { k ->
                     LabKnob.entries.indexOfFirst { it.label == k.label }.takeIf { it >= 0 }
@@ -215,11 +220,11 @@ fun FilterLabPanel(
                 if (indices.isEmpty()) return@forEach
                 val ranges = group.knobs.zip(indices)
                 val anySet = ranges.any { (k, i) -> recipe.knobValue(LabKnob.entries[i]) != k.neutral }
-                val open = anySet || group.title in openGroups
+                val open = group.title !in collapsed
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { openGroups = openGroups.toggle(group.title) }
+                        .clickable { collapsed = collapsed.toggle(group.title) }
                         .padding(top = 8.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -981,7 +986,7 @@ private fun CurvesBlock(
     onParametric: (Int, Float) -> Unit,
     onClear: () -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.toneCurveActive) }
+    var open by remember { mutableStateOf(true) }
     val group = remember(recipe.toneCurves) { ToneCurve.parseGroup(recipe.toneCurves) }
     val active = recipe.toneCurveActive
     SectionHeader("CURVES", active, dim, { open = !open }, open)
@@ -1011,7 +1016,7 @@ private fun HslBlock(
     dim: androidx.compose.ui.graphics.Color,
     onHsl: (Int, Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.hslActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("COLOR MIX (${if (recipe.hslActive) "on" else "off"})", recipe.hslActive, dim, { open = !open }, open)
     if (!open) return
     Hsl.BAND_NAMES.forEachIndexed { b, name ->
@@ -1030,7 +1035,7 @@ private fun GradeBlock(
     dim: androidx.compose.ui.graphics.Color,
     onGrade: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.gradeActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("COLOR GRADING", recipe.gradeActive, dim, { open = !open }, open)
     if (!open) return
     val g = remember(recipe.colorGrade) { recipe.gradeArray() ?: ColorGrade.defaults() }
@@ -1051,7 +1056,7 @@ private fun BwBlock(
     onBw: (Int, Float) -> Unit,
 ) {
     if (recipe.grayscale <= 0f) return
-    var open by remember { mutableStateOf(recipe.bwActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("B&W MIX", recipe.bwActive, dim, { open = !open }, open)
     if (!open) return
     val cur = remember(recipe.bwMix) { recipe.bwArray() ?: FloatArray(BwMix.VALUES) }
@@ -1067,7 +1072,7 @@ private fun CalBlock(
     dim: androidx.compose.ui.graphics.Color,
     onCal: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.calibrationActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("CALIBRATION", recipe.calibrationActive, dim, { open = !open }, open)
     if (!open) return
     val parts = remember(recipe.calibration) { recipe.calibrationParts() }
@@ -1084,7 +1089,7 @@ private fun DefringeBlock(
     dim: androidx.compose.ui.graphics.Color,
     onDefringe: (Int, Float) -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.defringeActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("DEFRINGE", recipe.defringeActive, dim, { open = !open }, open)
     if (!open) return
     val cur = remember(recipe.defringe) { recipe.defringeArray() ?: Defringe.defaults() }
@@ -1104,7 +1109,7 @@ private fun GeoBlock(
     onKnob: (Int, Float) -> Unit,
     onResetKnob: (Int) -> Unit,
 ) {
-    var open by remember { mutableStateOf(recipe.geoActive) }
+    var open by remember { mutableStateOf(true) }
     SectionHeader("GEOMETRY", recipe.geoActive, dim, { open = !open }, open)
     if (!open) return
     val cur = remember(recipe.geometry) { recipe.geoArray() ?: Geometry.defaults() }

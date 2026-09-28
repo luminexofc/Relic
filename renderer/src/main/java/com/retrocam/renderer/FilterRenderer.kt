@@ -302,9 +302,22 @@ class FilterRenderer(
         viewRef = view
     }
 
+    /**
+     * Points the pipeline at [spec] and asks for a frame.
+     *
+     * The requestRender is not optional. Both GLSurfaceViews are in
+     * RENDERMODE_WHEN_DIRTY, so `onDrawFrame` only runs when something asks it
+     * to, and the only thing that did was the camera's frame-available
+     * listener. A spec change that arrived while no camera frame did - a
+     * slider moved against a still, a still capture, a recipe loaded before
+     * the camera reopened - was stored correctly and then never drawn, which
+     * looks exactly like a dead control. `viewRef` is null only before
+     * attach(), so this is safe from any thread at any time.
+     */
     fun setSpec(spec: FilterSpec, intensity: Float) {
         currentSpec = spec
         currentIntensity = intensity
+        viewRef?.requestRender()
     }
 
     fun precompileAsync(spec: FilterSpec) {
