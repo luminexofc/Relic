@@ -126,7 +126,27 @@ class RecipeCodecTest {
         val r = SavedRecipe.create("FULL", "original", full)
         val back = nn(RecipeCodec.decode(RecipeCodec.encode(r)))
         val got = back.lab
-        assertEquals(full, got, "a fully-populated recipe must round trip exactly")
+        // Equal within the codec's own 4dp quantisation, which is what `q()`
+        // promises and what the content id is built on. Every field is checked
+        // explicitly rather than by comparing the recipes, because a whole-object
+        // compare hides which field drifted.
+        assertEquals(full.adjustments, got.adjustments, "adjustments")
+        for (k in LabKnob.entries) {
+            assertEquals(full.knobValue(k), got.knobValue(k), 1e-3f, k.name)
+        }
+        assertEquals(full.hsl, got.hsl, "hsl")
+        assertEquals(full.calibration, got.calibration, "calibration")
+        assertEquals(full.toneCurves, got.toneCurves, "tone curves")
+        assertEquals(full.shadowTint, got.shadowTint, "shadow tint")
+        assertEquals(full.highlightTint, got.highlightTint, "highlight tint")
+        assertEquals(full.duotoneShadow, got.duotoneShadow, "duotone shadow")
+        assertEquals(full.duotoneHighlight, got.duotoneHighlight, "duotone highlight")
+        assertEquals(full.stampText, got.stampText, "stamp text")
+        assertEquals(full.stampColor, got.stampColor, "stamp colour")
+        assertEquals(full.stampPosition, got.stampPosition, "stamp position")
+        assertEquals(full.watermarkId, got.watermarkId, "watermark id")
+        assertEquals(full.lutId, got.lutId, "lut id")
+        assertEquals(full.templateId, got.templateId, "template")
     }
 
     /**
@@ -147,6 +167,75 @@ class RecipeCodecTest {
         val v = nn(back.lab.hslArray())
         assertEquals(0.75f, v[4], 1e-3f)
         for (i in 0 until Hsl.VALUES) if (i != 4) assertEquals(0f, v[i], 1e-3f)
+    }
+
+    /**
+     * Saturation and Vibrance multiply, so an imported value is a product of two
+     * floats and lands on a value no 4dp quantisation can name exactly.
+     *
+     * `Saturation=-2` and `Vibrance=+10` give 1.0780001, which `q()` writes as
+     * `1.078`, and the decoded recipe then compared unequal to the one that went
+     * in. Nothing renders differently - a 4dp knob is invisible - but it is
+     * worth pinning, because the same shape of drift in a field the id hashes
+     * over would mint a second strip entry for a recipe that looks identical.
+     */
+    @Test
+    fun `a quantised knob round trips to its quantised value`() {
+        val raw = XmpImport.parse("""crs:Saturation="-2" crs:Vibrance="+10"""").recipe
+        val saved = SavedRecipe.create("MIX", "original", raw)
+        val back = nn(RecipeCodec.decode(RecipeCodec.encode(saved)))
+        // The decoded value is the quantised one, and is stable from there.
+        assertEquals(1.078f, back.lab.adjustments.saturation, 0f)
+        // Which is what makes the id stable, and the payload stable.
+        assertEquals(saved.id, back.id)
+        assertEquals(RecipeCodec.encode(saved), RecipeCodec.encode(back))
+    }
+
+    /**
+     * Every field, set to something non-neutral, and re-checked after a second
+     * save. The point of the *second* trip is that the first one is allowed to
+     * quantise; what must hold is that the quantised recipe is then a fixed
+     * point, so saving a shared recipe never produces a third variant.
+     */
+    @Test
+    fun `a fully populated recipe is a fixed point after one round trip`() {
+        val full = LabRecipe(
+            templateId = "SEPIA",
+            adjustments = LabAdjustments(0.1f, 1.2f, 0.8f, 0.4f, -0.2f),
+            vignette = 0.3f, grain = 0.4f, sharpen = 0.5f, blur = 0.1f,
+            glitch = 0.2f, duotone = 0.3f,
+            duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
+            lutId = "builtin_faded", lutAmount = 0.7f,
+            gamma = 1.25f, splitAmount = 0.4f,
+            shadowTint = 0xFF203040.toInt(), highlightTint = 0xFF403020.toInt(),
+            stampText = "'98", stampColor = 0xFFFF8C14.toInt(),
+            stampPosition = StampPosition.CENTER, stampAlpha = 0.7f,
+            watermarkId = "mark_x", watermarkAlpha = 0.5f,
+            watermarkPosition = StampPosition.TOP_LEFT,
+            toneCurves = ToneCurve.encodeGroup(
+                List(4) { FloatArray(ToneCurve.SIZE) { (it * 0.9f + 20f) / 255f } },
+            ),
+            highlights = 0.1f, shadows = 0.2f, whites = 0.3f, blacks = 0.4f,
+            texture = 0.5f, clarity = 0.6f, dehaze = 0.7f,
+            sharpRadius = 1.5f, detail = 0.8f, masking = 0.9f,
+            grainSize = 2f, grainRough = 0.3f,
+            vigMidpoint = 0.2f, vigFeather = 0.7f,
+            hsl = Hsl.encode(FloatArray(Hsl.VALUES) { (it - 11) / 30f }),
+            grayscale = 0.6f,
+            calibration = Calibration.encode(
+                floatArrayOf(0.1f, -0.2f, 0.3f),
+                floatArrayOf(0.4f, 0.5f, -0.6f),
+            ),
+        )
+        val first = SavedRecipe.create("FULL", "original", full)
+        val back = nn(RecipeCodec.decode(RecipeCodec.encode(first)))
+        val second = SavedRecipe.create("FULL", "original", back.lab)
+        assertEquals(first.id, second.id)
+        assertEquals(RecipeCodec.encode(first), RecipeCodec.encode(second))
+        // The first trip is allowed to quantise, the second must not change
+        // anything at all. This is the property the strip depends on: a shared
+        // recipe that re-saved differently every time would accumulate entries.
+        assertEquals(back, second, "a decoded recipe must be a fixed point")
     }
 
     /**
