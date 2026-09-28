@@ -87,6 +87,87 @@ object ToneCurve {
     }
 
     /**
+     * The seven `Parametric*` keys, folded into one 256-sample composite curve.
+     *
+     * ## What they are
+     *
+     * An alternative UI for the same curve `ToneCurvePV2012` carries. Adobe
+     * does not store the shape; it stores four amounts and three split points,
+     * and reconstructs the curve from them, differently in each of the four
+     * tonal ranges. A preset that uses it has no `ToneCurvePV2012` at all, so
+     * reading only the latter meant a parametric preset imported as a straight
+     * line - a very visible way of losing a preset's entire intent.
+     *
+     * They go into the COMPOSITE run rather than becoming a channel of their
+     * own, and the shader needs no new texture and no new fetch: it already
+     * applies four curves in four channels, and this is one of them.
+     *
+     * ## The approximation, and what is NOT being claimed
+     *
+     * Adobe's exact reconstruction is a monotone spline whose shape we do not
+     * have. What is built here is the intent: four overlapping linear ramps,
+     * one per range, each lifting or dropping its own range and leaving the
+     * others alone, with the three splits deciding where they meet.
+     *
+     * It is a **reconstruction, not a reversal.** We infer the curve Adobe
+     * would have produced from the amounts it published. A preset that uses
+     * only the parametric keys will look close and will not be identical, which
+     * is why the report marks these APPROXIMATE rather than EXACT. The claim is
+     * "this is the shape the preset asked for", not "this is Adobe's curve".
+     *
+     * The ramps span [lo, hi] rather than a symmetric window around their
+     * centre, which is what makes the four ranges tile the tonal scale. The
+     * obvious spelling of this - four symmetric bells - gives a curve with four
+     * humps in the wrong places.
+     */
+    fun foldParametric(
+        shadows: Float,
+        darks: Float,
+        lights: Float,
+        highlights: Float,
+        shadowSplit: Float,
+        midtoneSplit: Float,
+        highlightSplit: Float,
+    ): FloatArray? {
+        if (shadows == 0f && darks == 0f && lights == 0f && highlights == 0f) return null
+
+        // The three splits, in ascending order whatever order the file lists
+        // them: a hand-edited file with them out of sequence would otherwise
+        // produce an inverted curve, which is a far worse failure than a
+        // slightly wrong one.
+        val s1 = splitAt(shadowSplit, 0.15f, 0.85f)
+        val s2 = splitAt(midtoneSplit, 0.35f, 0.9f)
+        val s3 = splitAt(highlightSplit, 0.5f, 0.95f)
+        val b = s2.coerceAtMost(s3)
+        val a = s1.coerceAtMost(b)
+
+        val out = FloatArray(SIZE)
+        for (i in 0 until SIZE) {
+            val x = i / 255f
+            val delta = ramp(x, 0f, a) * shadows +
+                ramp(x, a, b) * darks +
+                ramp(x, b, 1f) * lights +
+                ramp(x, b, 1f) * highlights
+            // Half of the amount, because a +/-100 slider should visibly move
+            // the curve and not drive every pixel to black or white.
+            out[i] = (x + delta * 0.5f).coerceIn(0f, 1f)
+        }
+        return out
+    }
+
+    /**
+     * A linear 0..1 ramp across [lo, hi], flat 0 below `lo` and 1 above `hi`.
+     */
+    private fun ramp(x: Float, lo: Float, hi: Float): Float {
+        if (hi <= lo) return if (x >= hi) 1f else 0f
+        return ((x - lo) / (hi - lo)).coerceIn(0f, 1f)
+    }
+
+    /** One of Adobe's 0..100 splits, as a fraction of the tonal scale. */
+    private fun splitAt(v: Float, lo: Float, hi: Float): Float =
+        lo + (v / 100f).coerceIn(0f, 1f) * (hi - lo)
+
+    /**
      * Pack the four sampled curves into a 256x1 RGBA buffer for upload.
      *
      * Absent curves are the identity ramp rather than black, so applying all

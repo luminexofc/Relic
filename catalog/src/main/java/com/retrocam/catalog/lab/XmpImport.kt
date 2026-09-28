@@ -481,6 +481,54 @@ object XmpImport {
             add(key, v.take(24) + if (v.length > 24) "..." else "", "TONE CURVE", approx = true)
         }
 
+        // ---- Parametric curve: the same curve by a different description ----
+        // Adobe stores four amounts and three splits instead of the shape, so a
+        // preset that uses it has no ToneCurvePV2012 at all. Folded into the
+        // composite run, which the shader already samples, so this costs
+        // nothing on the GPU.
+        val parAmounts = arrayOfNulls<Float>(4)
+        listOf(
+            "ParametricShadows" to 0,
+            "ParametricDarks" to 1,
+            "ParametricLights" to 2,
+            "ParametricHighlights" to 3,
+        ).forEach { (key, slot) ->
+            val label = "TONE CURVE " + key.removePrefix("Parametric").uppercase()
+            knob(key, label, approx = true) { _, v -> parAmounts[slot] = v }
+        }
+        val parSplits = arrayOfNulls<Float>(3)
+        listOf(
+            "ParametricShadowSplit" to 0,
+            "ParametricMidtoneSplit" to 1,
+            "ParametricHighlightSplit" to 2,
+        ).forEach { (key, slot) ->
+            val label = "TONE CURVE " + key.removePrefix("Parametric").uppercase()
+            knob(key, label, approx = true) { _, v -> parSplits[slot] = v }
+        }
+        val parametric = ToneCurve.foldParametric(
+            shadows = parAmounts[0] ?: 0f,
+            darks = parAmounts[1] ?: 0f,
+            lights = parAmounts[2] ?: 0f,
+            highlights = parAmounts[3] ?: 0f,
+            shadowSplit = parSplits[0] ?: 50f,
+            midtoneSplit = parSplits[1] ?: 50f,
+            highlightSplit = parSplits[2] ?: 50f,
+        )
+        if (parametric != null) {
+            // A file that somehow has both: the explicit points are the real
+            // curve, so they win, and the parametric fold is dropped rather than
+            // applied on top of something it was only ever an alternative to.
+            if (curves[0] == null) {
+                curves[0] = parametric
+                anyCurve = true
+            } else {
+                keys += XmpKey(
+                    "Parametric*", "(7 keys)", Fidelity.EXACT,
+                    mapsTo = "not applied: this preset also carries a ToneCurvePV2012",
+                )
+            }
+        }
+
         // ---- Calibration: six primary trims, plus a shadow tint ----
         //
         // A 3x3 on the primaries, and this is the one place a matrix would be
@@ -649,6 +697,51 @@ object XmpImport {
         if (highlightSat > 0f) {
             val c = Hsl.hslToRgb(highlightHue * 360f, highlightSat, 0.5f)
             splitHighlightTint = packRgb(c[0], c[1], c[2])
+        }
+
+        // ---- Defringe: purple and green fringing removal ----
+        //
+        // Not implemented, and named rather than skipped. Each of the two has an
+        // amount plus a hue range, so honouring it means masking by hue and
+        // desaturating inside that range - which is a real operator, not a
+        // scalar, and one whose visual effect is small on a phone lens that has
+        // mostly already had it corrected. The keys are reported so the gap is
+        // visible instead of the report looking complete.
+        for (k in listOf(
+            "DefringePurpleAmount", "DefringeGreenAmount",
+            "DefringePurpleHueLo", "DefringePurpleHueHi",
+            "DefringeGreenHueLo", "DefringeGreenHueHi",
+        )) {
+            drop(k, "hue-masked fringing removal; not implemented")
+        }
+
+        // ---- noise reduction: luminance and colour ----
+        //
+        // Not implemented, and this one is a real limit rather than a choice.
+        // Both are neighbourhood statistics: how much a pixel differs from the
+        // median of its surroundings. That does not fit a fragment shader,
+        // which sees one pixel at a time, and approximating it with a blur
+        // would smooth real detail rather than noise.
+        for (k in listOf("LuminanceSmoothing", "ColorNoiseReduction")) {
+            drop(k, "neighbourhood noise reduction; needs a compute pass, not a fragment shader")
+        }
+
+        // ---- ShadowTint: the calibration panel's shadow bias ----
+        //
+        // A green/magenta shift applied to the shadows only, which is what the
+        // Lab's split tone already is. The Lab's shadow tint is a colour and
+        // Adobe's is a signed green/magenta amount, so this maps onto the
+        // existing `shadowTint` rather than needing a new control.
+        knob("ShadowTint", "SHADOW TINT", approx = true) { _, v ->
+            val amt = (v / 100f).coerceIn(-1f, 1f)
+            // Positive is green, negative magenta, matching Adobe's direction.
+            splitShadowTint = if (amt >= 0f) {
+                packRgb(0.5f - 0.5f * amt * 0.3f, 0.5f + 0.5f * amt * 0.3f, 0.5f)
+            } else {
+                val m = -amt * 0.3f
+                packRgb(0.5f + 0.5f * m, 0.5f - 0.5f * m, 0.5f)
+            }
+            if (splitAmount == 0f) splitAmount = kotlin.math.abs(amt)
         }
 
         // ---- everything else, reported rather than silently dropped ----

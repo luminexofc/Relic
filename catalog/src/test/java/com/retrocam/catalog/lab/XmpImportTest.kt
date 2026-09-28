@@ -502,6 +502,117 @@ class XmpImportTest {
     }
 
     /** A preset that sets no tone curve leaves the recipe inactive. */
+    /**
+     * A parametric preset carries no ToneCurvePV2012 at all, so before this it
+     * imported as a straight line: the entire intent of the preset, gone.
+     */
+    @Test
+    fun `a parametric curve is reconstructed rather than dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:ParametricShadows="+20" crs:ParametricDarks="+10"
+            crs:ParametricLights="-15" crs:ParametricHighlights="+30"
+            crs:ParametricShadowSplit="25" crs:ParametricMidtoneSplit="50"
+            crs:ParametricHighlightSplit="75"
+            """.trimIndent(),
+        )
+        assertEquals("no parametric key should be unimplemented", 0, res.ignored.size)
+        assertTrue(res.recipe.toneCurveActive)
+        val g = nn(ToneCurve.parseGroup(res.recipe.toneCurves))
+        // It lands in the composite run, which is the one the shader samples
+        // first, so it needs no new texture and no new fetch.
+        assertNotNull(g[0])
+        assertNull(g[1])
+        // All seven are approximate: this is a reconstruction of Adobe's curve
+        // from its published amounts, not a reversal of it.
+        assertEquals(7, res.approximate.size)
+    }
+
+    /** Lifting the shadows must lift the dark end and leave white alone. */
+    @Test
+    fun `a shadow lift raises the dark end and pins white`() {
+        val c = nn(ToneCurve.foldParametric(20f, 0f, 0f, 0f, 50f, 50f, 50f))
+        assertTrue("blacks should be lifted", c[10] > 10 / 255f)
+        assertEquals(1f, c[255], 1e-3f)
+    }
+
+    /** Pulling the highlights down must lower the bright end and pin black. */
+    @Test
+    fun `a highlight pull lowers the bright end and pins black`() {
+        val c = nn(ToneCurve.foldParametric(0f, 0f, 0f, -30f, 50f, 50f, 50f))
+        assertEquals(0f, c[0], 1e-3f)
+        assertTrue("whites should be pulled down", c[245] < 245 / 255f)
+    }
+
+    /**
+     * The four ranges must tile the tonal scale, not stack at mid-grey.
+     *
+     * A symmetric-bell implementation of the same idea produces a curve that
+     * rises and falls four times; this one is monotone per range, which is what
+     * a real tone curve is.
+     */
+    @Test
+    fun `the four ranges do not all peak at midtone`() {
+        val c = nn(ToneCurve.foldParametric(40f, 40f, 40f, 40f, 20f, 50f, 80f))
+        // Compare the lift in the shadows against the lift in the highlights: if
+        // all four ranges peaked together these would be equal.
+        val shadowLift = c[30] - 30 / 255f
+        val highlightLift = c[225] - 225 / 255f
+        assertTrue(
+            "shadow lift $shadowLift and highlight lift $highlightLift look like the same range",
+            kotlin.math.abs(shadowLift - highlightLift) > 0.02f,
+        )
+    }
+
+    @Test
+    fun `no amounts means no curve`() {
+        assertNull(ToneCurve.foldParametric(0f, 0f, 0f, 0f, 25f, 50f, 75f))
+    }
+
+    /**
+     * Adobe's ShadowTint is a signed green/magenta shift on the shadows, which
+     * is what the Lab's split tone already is. It maps onto the existing
+     * `shadowTint` rather than needing a control of its own.
+     */
+    @Test
+    fun `shadow tint maps onto the existing split tone`() {
+        val green = XmpImport.parse("""crs:ShadowTint="+60"""").recipe
+        assertTrue("a shadow tint should switch the split on", green.splitAmount > 0f)
+        val g = unpackRgb(green.shadowTint)
+        assertTrue("positive should be green: ${g.toList()}", g[1] > g[0] && g[1] > g[2])
+
+        val magenta = XmpImport.parse("""crs:ShadowTint="-60"""").recipe
+        val m = unpackRgb(magenta.shadowTint)
+        assertTrue("negative should be magenta: ${m.toList()}", m[0] > m[1] && m[2] > m[1])
+    }
+
+    @Test
+    fun `a zero shadow tint is honoured and leaves the split alone`() {
+        val res = XmpImport.parse("""crs:ShadowTint="0"""")
+        assertEquals(0, res.ignored.size)
+        assertEquals(0f, res.recipe.splitAmount, 0f)
+    }
+
+    /** A hand-edited file with the splits out of order must not invert. */
+    @Test
+    fun `splits out of order still give a sane curve`() {
+        val c = nn(ToneCurve.foldParametric(20f, 20f, 20f, 20f, 90f, 10f, 50f))
+        for (i in 1 until ToneCurve.SIZE) {
+            assertTrue("curve went backwards at $i", c[i] >= c[i - 1] - 1e-3f)
+        }
+    }
+
+    /** The seven keys need no new shader work at all. */
+    @Test
+    fun `the parametric fold needs no new texture`() {
+        // It goes into the composite channel of a texture the shader already
+        // samples, so this is a guard against someone adding a second curve
+        // texture when they extend this.
+        assertTrue("the curve sampler changed", com.retrocam.catalog.Shaders.LAB_GRADE.contains("u_curve"))
+        assertEquals(1, Regex("sampler2D u_curve").findAll(com.retrocam.catalog.Shaders.HEADER).count())
+    }
+
+    /** A preset with no curve leaves the recipe inactive. */
     @Test
     fun `a preset with no curve leaves the recipe inactive`() {
         val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
