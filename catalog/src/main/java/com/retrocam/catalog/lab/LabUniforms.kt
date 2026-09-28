@@ -52,6 +52,14 @@ data class LabUniforms(
     val hslActive: Float,
     /** Adobe's Grayscale switch, 0..1. */
     val grayscale: Float,
+    /**
+     * Adobe's Calibration as 12 floats: three matrix rows of 3, in
+     * [LabGrading.toUniforms] layout. All zero when no calibration is set,
+     * which [calActive] says so the shader can skip it.
+     */
+    val calibration: FloatArray,
+    /** 1 when a calibration is set, which is what makes the shader skip it. */
+    val calActive: Float,
     val sharpRadius: Float,
     val detail: Float,
     val masking: Float,
@@ -146,6 +154,9 @@ data class LabUniforms(
             hsl = recipe.hslArray() ?: FloatArray(Hsl.VALUES),
             hslActive = if (recipe.hslActive) 1f else 0f,
             grayscale = recipe.grayscale.coerceIn(0f, 1f),
+            calibration = recipe.calibrationMatrix()
+                ?.let { LabGrading.toUniforms(it) } ?: FloatArray(12),
+            calActive = if (recipe.calibrationActive) 1f else 0f,
             curveTex = if (recipe.toneCurveActive) {
                 ToneCurve.toRgba(ToneCurve.parseGroup(recipe.toneCurves))
             } else {

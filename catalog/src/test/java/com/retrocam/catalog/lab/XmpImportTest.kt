@@ -397,6 +397,74 @@ class XmpImportTest {
         assertNull(r.hslArray())
     }
 
+    /**
+     * The six calibration keys, which is the one place a matrix is genuinely
+     * the right answer: a calibration moves one primary without disturbing the
+     * others, and a diagonal scale cannot say that.
+     */
+    @Test
+    fun `calibration is imported not dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:RedHue="+10" crs:RedSaturation="+20"
+            crs:GreenHue="-5" crs:GreenSaturation="+15"
+            crs:BlueHue="+5" crs:BlueSaturation="-10"
+            """.trimIndent(),
+        )
+        assertEquals(0, res.ignored.size)
+        val (h, s) = nn(res.recipe.calibrationParts())
+        assertEquals(0.1f, h[0], 1e-3f)
+        assertEquals(0.2f, s[0], 1e-3f)
+        assertEquals(-0.05f, h[1], 1e-3f)
+        assertEquals(0.15f, s[1], 1e-3f)
+        assertEquals(0.05f, h[2], 1e-3f)
+        assertEquals(-0.1f, s[2], 1e-3f)
+        assertTrue(res.recipe.calibrationActive)
+        assertNotNull(res.recipe.calibrationMatrix())
+    }
+
+    @Test
+    fun `a neutral calibration leaves the matrix off`() {
+        val r = XmpImport.parse("""crs:RedHue="0" crs:RedSaturation="0"""").recipe
+        assertFalse(r.calibrationActive)
+        assertEquals(Calibration.NONE, r.calibration)
+        assertNull(r.calibrationMatrix())
+    }
+
+    @Test
+    fun `calibration values are clamped`() {
+        val (h, s) = nn(
+            XmpImport.parse(
+                """crs:RedHue="+9000" crs:RedSaturation="-9000" crs:BlueHue="+9000"""",
+            ).recipe.calibrationParts(),
+        )
+        for (v in h) assertTrue("hue $v out of range", v in -1f..1f)
+        for (v in s) assertTrue("sat $v out of range", v in -1f..1f)
+    }
+
+    /**
+     * A file can carry two spellings of one setting. We apply one of them, and
+     * the other must be reported as honoured rather than as unimplemented -
+     * which is precisely what happened: a preset with both `VignetteAmount` and
+     * `PostCropVignetteAmount` reported one of them as having no Lab
+     * equivalent, while the identical setting under the other name worked.
+     */
+    @Test
+    fun `a losing duplicate spelling is honoured not reported as unimplemented`() {
+        val res = XmpImport.parse(
+            """crs:VignetteAmount="-22" crs:PostCropVignetteAmount="-22"""",
+        )
+        // Neither spelling is a failure: one was applied, the other is the same
+        // setting under a name we do not use, and the file told us both.
+        assertEquals("no spelling should be reported as unimplemented", 0, res.ignored.size)
+        // Both are accounted for, so coverage stays 100 rather than counting one
+        // of them as a miss.
+        assertEquals(2, res.applied.size)
+        assertEquals(100, res.coveragePercent)
+        // And the vignette is applied once, not twice.
+        assertEquals(0.22f, res.recipe.vignette, 1e-3f)
+    }
+
     @Test
     fun `grayscale is imported and clamped`() {
         val on = XmpImport.parse("""crs:ConvertToGrayscale="True"""").recipe

@@ -77,6 +77,14 @@ object Shaders {
         uniform vec3 u_duoShadow;
         uniform vec3 u_duoHighlight;
 
+        // Adobe's Calibration: a 3x3 on the primaries. Rows rather than a mat3,
+        // for the same reason as u_ccmR0: no column-major transpose to get wrong.
+        uniform vec3 u_calR0;
+        uniform vec3 u_calR1;
+        uniform vec3 u_calR2;
+        /** 0 unless a calibration is set, which is what makes the shader skip it. */
+        uniform float u_calActive;
+
         // Filter Lab colour correction that a 4x5 matrix cannot express: a power
         // curve and a luminance-keyed split tone.
         // Area mask. Shape 0 is FULL and must evaluate to exactly 1.0, because the
@@ -1211,6 +1219,18 @@ object Shaders {
 
             // --- 6. Temp and Tint: three diagonal scales, no offset ---
             c *= vec3(u_rScale, u_gScale, u_bScale);
+
+            // --- 6b. Calibration. With temp and tint, and immediately after it:
+            // both are corrections to the same thing, and a calibration that
+            // undid the warmth above it would be pointless. Not a texture
+            // fetch, three dot products.
+            if (u_calActive > 0.0) {
+                c = vec3(
+                    dot(u_calR0, c),
+                    dot(u_calR1, c),
+                    dot(u_calR2, c)
+                );
+            }
 
             // --- 7. Vibrance and Saturation. This is exactly
             // LabGrading.saturationMatrix, since both are built from the same

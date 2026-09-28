@@ -179,7 +179,8 @@ object XmpImport {
         "UseLegacyAdobe2012Adjustments", "Cluster", "ClusterName", "UUID",
         // Provenance.
         "Version", "Copyright", "ContactInfo", "Name", "Description", "Creator",
-        "ProfileCopyright", "ProfileName", "ToneCurveName", "ProcessVersion",
+        "ProfileCopyright", "ProfileName", "ToneCurveName", "ToneCurveName2012",
+        "OverrideLookVignette", "OverrideLook", "ProcessVersion",
         // Crop is framing, not grading, and the Lab does not crop.
         "CropAmount", "CropTop", "CropLeft", "CropBottom", "CropRight",
         // Raw converter inputs. Honouring these means DNG profile support.
@@ -233,6 +234,8 @@ object XmpImport {
         "Whites2012" to listOf("Whites"),
         "Blacks2012" to listOf("Blacks"),
         "Texture" to emptyList(),
+        // Adobe renamed Clarity to Clarity2012 in Process 3 and both spellings
+        // are still in files in the wild.
         "Clarity2012" to listOf("Clarity"),
         "Dehaze" to emptyList(),
         "Saturation" to emptyList(),
@@ -247,28 +250,69 @@ object XmpImport {
         "PostCropVignetteAmount" to listOf("VignetteAmount"),
         "PostCropVignetteMidpoint" to listOf("VignetteMidpoint"),
         "PostCropVignetteFeather" to listOf("VignetteFeather"),
+        // Old split toning, superseded by Color Grading but still emitted by
+        // every preset saved before Lightroom 4.
+        "SplitToningShadowHue" to emptyList(),
+        "SplitToningShadowSaturation" to emptyList(),
+        "SplitToningHighlightHue" to emptyList(),
+        "SplitToningHighlightSaturation" to emptyList(),
+        "SplitToningBalance" to emptyList(),
+        // The old continuous grayscale, superseded by the boolean switch.
+        "GrayscaleMix" to listOf("GrayscaleMixer"),
+        // Calibration, six primary trims.
+        "RedHue" to emptyList(),
+        "RedSaturation" to emptyList(),
+        "GreenHue" to emptyList(),
+        "GreenSaturation" to emptyList(),
+        "BlueHue" to emptyList(),
+        "BlueSaturation" to emptyList(),
     )
 
     /**
      * Resolves a canonical key to the one actually present in [a], or null.
      *
-     * Returns the canonical name too, because the report has to name the key the
+     * Returns the matched name too, because the report has to name the key the
      * file used, not the one we wished it had used. A preset that says
      * `SharpenEdgeMasking` and gets a masking slider is a success, but a report
      * claiming `Masking` was applied would be a lie about the file.
+     *
+     * [consumed] records what was matched. A file carrying BOTH spellings is
+     * possible and then the loser is never visited by any block, so without
+     * this it fell through to the unrecognised-key loop and was reported as
+     * having no Lab equivalent - which is the exact thing the alias table
+     * exists to prevent.
      */
-    private fun resolve(a: Map<String, String>, canonical: String): Pair<String, String>? {
+    private fun resolve(
+        a: Map<String, String>,
+        canonical: String,
+        consumed: MutableSet<String>,
+    ): Pair<String, String>? {
         for (name in listOf(canonical) + ALIASES[canonical].orEmpty()) {
             val v = a[name] ?: continue
+            consumed += name
             return name to v
         }
         return null
     }
 
+    /**
+     * Every spelling of every setting, canonical and alias.
+     *
+     * A file may carry two spellings of one setting. We apply one of them and
+     * have to account for the other, and "accounted for" is not the same as
+     * "unsupported": it was honoured, under the other name.
+     */
+    private val ALL_SPELLINGS: Set<String> =
+        (ALIASES.keys + ALIASES.values.flatten()).toSet()
+
     /** All locals, so two imports cannot bleed into each other. */
     fun parse(xmp: String): XmpResult {
         val a = readAttributes(xmp)
         val keys = mutableListOf<XmpKey>()
+        // Which spellings were actually read, so the inventory pass below can
+        // tell "we never heard of this key" from "we heard of it, under another
+        // name in the same file".
+        val consumed = mutableSetOf<String>()
 
         var gamma = 1f
         var contrast = 1f
@@ -346,7 +390,7 @@ object XmpImport {
             isNeutralAtZero: Float = 0f,
             f: (String, Float) -> Unit,
         ) {
-            val (name, raw) = resolve(a, canonical) ?: return
+            val (name, raw) = resolve(a, canonical, consumed) ?: return
             val v = num(raw) ?: return
             if (v == isNeutralAtZero) {
                 neutral(name, raw)
@@ -396,7 +440,7 @@ object XmpImport {
         // Kelvin is absolute and warmth is a -1..1 opinion, so the pivot is
         // Adobe's own 5500K reference and the scale is logarithmic: 2000K to
         // 5000K is one step to a person, 5000K to 50000K is barely one.
-        val tempResolved = resolve(a, "Temperature")
+        val tempResolved = resolve(a, "Temperature", consumed)
         if (tempResolved != null) {
             val (tempKey, tempRaw) = tempResolved
             val k = num(tempRaw)
@@ -436,6 +480,31 @@ object XmpImport {
             anyCurve = true
             add(key, v.take(24) + if (v.length > 24) "..." else "", "TONE CURVE", approx = true)
         }
+
+        // ---- Calibration: six primary trims, plus a shadow tint ----
+        //
+        // A 3x3 on the primaries, and this is the one place a matrix would be
+        // the right answer rather than a loss. The SATURATION half is exactly a
+        // diagonal scale, which is what warmth/tint already is, so those three
+        // keys fold in perfectly. The HUE half is a per-primary rotation and has
+        // no diagonal representation at all, so it needs a matrix of its own.
+        //
+        // Both halves are done rather than approximated into the wrong knob: a
+        // preset that rotates its reds without touching its blues is the whole
+        // point of a calibration panel, and folding a hue rotation into a
+        // per-channel scale produces a colour nobody asked for.
+        val calHue = floatArrayOf(0f, 0f, 0f)
+        val calSat = floatArrayOf(0f, 0f, 0f)
+        val calNames = listOf("Red", "Green", "Blue")
+        calNames.forEachIndexed { ch, name ->
+            knob("${name}Hue", "CALIBRATION ${name.uppercase()} HUE", approx = true) { _, v ->
+                calHue[ch] = (v / 100f).coerceIn(-1f, 1f)
+            }
+            knob("${name}Saturation", "CALIBRATION ${name.uppercase()} SAT", approx = true) { _, v ->
+                calSat[ch] = (v / 100f).coerceIn(-1f, 1f)
+            }
+        }
+        val calibrationField = Calibration.encode(calHue, calSat)
 
         // ---- the four range controls, XMP -100..100 mapped to -1..1 ----
         val ranges = arrayOfNulls<Float>(4)
@@ -524,7 +593,7 @@ object XmpImport {
         // ---- grayscale: a real switch, and the only colour key that removes
         // colour outright rather than shifting it ----
         var grayscale = 0f
-        resolve(a, "ConvertToGrayscale")?.let { (name, raw) ->
+        resolve(a, "ConvertToGrayscale", consumed)?.let { (name, raw) ->
             val on = when (raw.trim()) {
                 "True", "true", "1" -> 1f
                 "False", "false", "0" -> 0f
@@ -598,10 +667,18 @@ object XmpImport {
         val seen = keys.map { it.key }.toSet()
         for ((k, v) in a) {
             if (k in seen || k in METADATA) continue
-            if (k in NOT_A_LOOK_EXACT || NOT_A_LOOK_PREFIXES.any { k.startsWith(it) }) {
-                keys += XmpKey(k, v, Fidelity.NOT_A_LOOK, reason = "not a look setting")
-            } else {
-                keys += XmpKey(k, v, Fidelity.UNSUPPORTED, reason = "no Lab equivalent yet")
+            when {
+                k in NOT_A_LOOK_EXACT || NOT_A_LOOK_PREFIXES.any { k.startsWith(it) } ->
+                    keys += XmpKey(k, v, Fidelity.NOT_A_LOOK, reason = "not a look setting")
+                // A second spelling of a setting we already applied. It was
+                // honoured, under the other name, so it is neutral rather than
+                // unsupported - and saying otherwise is what made a preset with
+                // both VignetteAmount and PostCropVignetteAmount report one of
+                // them as unimplemented.
+                k in ALL_SPELLINGS ->
+                    keys += XmpKey(k, v, Fidelity.EXACT, mapsTo = "neutral (duplicate spelling)")
+                else ->
+                    keys += XmpKey(k, v, Fidelity.UNSUPPORTED, reason = "no Lab equivalent yet")
             }
         }
 
@@ -635,6 +712,7 @@ object XmpImport {
                 vigFeather = vigFeather,
                 hsl = if (anyHsl) Hsl.encode(hsl) else Hsl.NONE,
                 grayscale = grayscale,
+                calibration = calibrationField,
                 splitAmount = splitAmount,
                 shadowTint = splitShadowTint,
                 highlightTint = splitHighlightTint,

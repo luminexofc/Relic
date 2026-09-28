@@ -645,31 +645,21 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    /** Updates one grading knob. [which] indexes [com.retrocam.catalog.lab.Knob.RANGES]. */
+    /**
+     * Updates one grading knob. [which] indexes
+     * [com.retrocam.catalog.lab.LabKnob], which covers every scalar the XMP
+     * importer can set.
+     *
+     * Keyed by the enum rather than by the old positional `when`, because that
+     * block had five cases in one branch and two `return@update` escapes, and
+     * adding a sixth control to it meant remembering all of that. The whole
+     * range table now lives with the enum.
+     */
     fun setLabKnob(which: Int, value: Float) {
+        val k = com.retrocam.catalog.lab.LabKnob.byIndex(which) ?: return
         pendingSelectedRecipe = null
         _uiState.update { s ->
-            val knobs = com.retrocam.catalog.lab.LabAdjustments.RANGES
-            val k = knobs.getOrNull(which) ?: return@update s
-            val a = s.labRecipe.adjustments
-            val next = when (which) {
-                0 -> a.copy(brightness = value.coerceIn(k.min, k.max))
-                1 -> a.copy(contrast = value.coerceIn(k.min, k.max))
-                2 -> a.copy(saturation = value.coerceIn(k.min, k.max))
-                3 -> a.copy(warmth = value.coerceIn(k.min, k.max))
-                4 -> a.copy(tint = value.coerceIn(k.min, k.max))
-                else -> a
-            }
-            // Indices 5 and 6 are not part of LabAdjustments: gamma is a power
-            // curve and split tone is luminance-keyed, so neither can ride in the
-            // 4x5 colour matrix. They live on the recipe instead.
-            if (which == 5) return@update s.copy(
-                labRecipe = s.labRecipe.copy(gamma = value.coerceIn(k.min, k.max)),
-            )
-            if (which == 6) return@update s.copy(
-                labRecipe = s.labRecipe.copy(splitAmount = value.coerceIn(k.min, k.max)),
-            )
-            s.copy(labRecipe = s.labRecipe.copy(adjustments = next))
+            s.copy(labRecipe = s.labRecipe.withKnob(k, value))
         }
     }
 
@@ -1038,9 +1028,14 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    /** Resets a knob to its neutral point. */
+    /**
+     * Resets a knob to its neutral point.
+     *
+     * The neutral is read off a default recipe rather than stored, so it cannot
+     * drift from what the shader actually treats as off.
+     */
     fun resetLabKnob(which: Int) {
-        val k = com.retrocam.catalog.lab.LabAdjustments.RANGES.getOrNull(which) ?: return
+        val k = com.retrocam.catalog.lab.LabKnob.byIndex(which) ?: return
         setLabKnob(which, k.neutral)
     }
 

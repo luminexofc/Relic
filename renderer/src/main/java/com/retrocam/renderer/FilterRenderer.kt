@@ -88,6 +88,10 @@ class FilterRenderer(
         val uHsl: Int,
         val uHslActive: Int,
         val uGrayscale: Int,
+        val uCalR0: Int,
+        val uCalR1: Int,
+        val uCalR2: Int,
+        val uCalActive: Int,
         val uSharpRadius: Int,
         val uDetail: Int,
         val uMasking: Int,
@@ -734,6 +738,10 @@ class FilterRenderer(
                 uHsl = GLES20.glGetUniformLocation(p, "u_hsl"),
                 uHslActive = GLES20.glGetUniformLocation(p, "u_hslActive"),
                 uGrayscale = GLES20.glGetUniformLocation(p, "u_grayscale"),
+                uCalR0 = GLES20.glGetUniformLocation(p, "u_calR0"),
+                uCalR1 = GLES20.glGetUniformLocation(p, "u_calR1"),
+                uCalR2 = GLES20.glGetUniformLocation(p, "u_calR2"),
+                uCalActive = GLES20.glGetUniformLocation(p, "u_calActive"),
                 uSharpRadius = GLES20.glGetUniformLocation(p, "u_sharpRadius"),
                 uDetail = GLES20.glGetUniformLocation(p, "u_detail"),
                 uMasking = GLES20.glGetUniformLocation(p, "u_masking"),
@@ -1099,6 +1107,15 @@ class FilterRenderer(
                 GLES20.glUniform1f(prog.uHslActive, 0f)
             }
             GLES20.glUniform1f(prog.uGrayscale, u.grayscale)
+            if (u.calActive > 0f) {
+                val cm = u.calibration
+                GLES20.glUniform3f(prog.uCalR0, cm[0], cm[1], cm[2])
+                GLES20.glUniform3f(prog.uCalR1, cm[3], cm[4], cm[5])
+                GLES20.glUniform3f(prog.uCalR2, cm[6], cm[7], cm[8])
+                GLES20.glUniform1f(prog.uCalActive, u.calActive)
+            } else {
+                GLES20.glUniform1f(prog.uCalActive, 0f)
+            }
             GLES20.glUniform1f(prog.uSharpRadius, u.sharpRadius)
             GLES20.glUniform1f(prog.uDetail, u.detail)
             GLES20.glUniform1f(prog.uMasking, u.masking)

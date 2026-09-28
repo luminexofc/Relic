@@ -50,8 +50,9 @@ class RecipeCodecTest {
         local: List<String> = listOf("0", "0", "0"),
         ops: List<String> = listOf("1", "0", "0", "1", "0.5", "0.5", "0.5"),
         mixer: List<String> = listOf("-", "0"),
+        calibration: String = "-",
     ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut +
-        colour + stamp + reserved + stages + curves + ranges + local + ops + mixer)
+        colour + stamp + reserved + stages + curves + ranges + local + ops + mixer + calibration)
         .joinToString(",")
 
     @Test
@@ -78,7 +79,7 @@ class RecipeCodecTest {
         // length, which is what catches a payload() helper that fell behind.
         assertEquals(built, payload().split(',').size, "payload() is out of step with encode()")
         // If these ever disagree the app is unreadable, so pin the number too.
-        assertEquals(49, built, "field count changed; bump FIELD_COUNT and this test")
+        assertEquals(50, built, "field count changed; bump FIELD_COUNT and this test")
     }
 
     /**

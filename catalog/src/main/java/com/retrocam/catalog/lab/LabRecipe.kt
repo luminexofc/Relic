@@ -155,7 +155,26 @@ data class LabRecipe(
      * produce the neutral of a real channel mix.
      */
     val grayscale: Float = 0f,
+
+    /**
+     * Adobe's Calibration, six -1..1 adjustments packed as
+     * `redHue redSat greenHue greenSat blueHue blueSat`, or [Calibration.NONE].
+     *
+     * The source adjustments are stored, not the 3x3 they compose into, so they
+     * round-trip exactly and the matrix is derived on the way to the GPU. See
+     * [Calibration] for why this one really is a matrix.
+     */
+    val calibration: String = Calibration.NONE,
 ) {
+    /** The parsed `(hue, saturation)` pair, or null when no calibration is set. */
+    fun calibrationParts(): Pair<FloatArray, FloatArray>? = Calibration.parse(calibration)
+
+    /** The 3x3 in 4x5 row-major form, ready for [LabGrading.toUniforms]. */
+    fun calibrationMatrix(): FloatArray? = calibrationParts()?.let { (h, s) -> Calibration.build(h, s) }
+
+    /** True when any calibration control is off neutral. */
+    val calibrationActive: Boolean get() = calibration != Calibration.NONE
+
     /** True when any local-contrast control is off neutral. */
     val localActive: Boolean
         get() = texture != 0f || clarity != 0f || dehaze != 0f
@@ -188,7 +207,7 @@ data class LabRecipe(
     val isIdentity: Boolean
         get() = templateId == null && adjustments.isNeutral && !hasEffects &&
             stages.isEmpty() && !toneCurveActive && !rangesActive && !localActive &&
-            !hslActive && grayscale == 0f
+            !hslActive && grayscale == 0f && !calibrationActive
 
     /** True when at least one effect stage is active. */
     val hasEffects: Boolean
@@ -221,6 +240,7 @@ data class LabRecipe(
         if (vigMidpoint != 0.5f || vigFeather != 0.5f) add("vignette falloff")
         if (hslActive) add("color mixer")
         if (grayscale > 0f) add("grayscale")
+        if (calibrationActive) add("calibration")
         stages.take(MAX_STAGES).forEach { st ->
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
@@ -295,6 +315,10 @@ data class LabRecipe(
             // can index the array blind.
             hsl = Hsl.encode(r.hslArray()),
             grayscale = r.grayscale.coerceIn(0f, 1f),
+            // Re-encoded from the parsed values, so a hand-edited or truncated
+            // field is normalised and clamped rather than passed to the GPU.
+            calibration = r.calibrationParts()?.let { (h, s) -> Calibration.encode(h, s) }
+                ?: Calibration.NONE,
             stampText = r.stampText?.take(24)?.takeIf { it.isNotBlank() },
             stampColor = r.stampColor,
             stampPosition = r.stampPosition,

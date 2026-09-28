@@ -115,7 +115,8 @@ data class SavedRecipe(
             append(RecipeCodec.q(lab.vigMidpoint)).append(',')
             append(lab.vigFeather).append(',')
             append(lab.hsl).append(',')
-            append(RecipeCodec.q(lab.grayscale)).append('|')
+            append(RecipeCodec.q(lab.grayscale)).append(',')
+            append(lab.calibration).append('|')
             append(lab.stagesClamped().joinToString("!") { st ->
                 st.primitiveId + '~' + RecipeCodec.q(st.amountClamped) + '~' +
                     st.maskClamped.toString() + '~' +
@@ -171,7 +172,7 @@ object RecipeCodec {
      * RecipeCodecTest now asserts this against a real encode, so the two cannot
      * drift again without a red test rather than a blank app.
      */
-    private const val FIELD_COUNT = 49
+    private const val FIELD_COUNT = 50
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -211,6 +212,7 @@ object RecipeCodec {
             q(lab.vigMidpoint), q(lab.vigFeather),
             lab.hsl,
             q(lab.grayscale),
+            lab.calibration,
         ).joinToString(SEP)
     }
 
@@ -353,6 +355,7 @@ object RecipeCodec {
                     vigFeather = parts[46].toFloat(),
                     hsl = parts[47].takeIf { it != Hsl.NONE } ?: Hsl.NONE,
                     grayscale = parts[48].toFloat(),
+                    calibration = parts[49].takeIf { it != Calibration.NONE } ?: Calibration.NONE,
                 ),
             )
             SavedRecipe(

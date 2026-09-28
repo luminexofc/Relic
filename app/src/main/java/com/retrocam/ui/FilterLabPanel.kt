@@ -50,8 +50,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.retrocam.catalog.lab.LAB_EFFECTS
-import com.retrocam.catalog.lab.LabAdjustments
+import com.retrocam.catalog.lab.LAB_KNOB_GROUPS
+import com.retrocam.catalog.lab.LabKnob
 import com.retrocam.catalog.lab.effectValue
+import com.retrocam.catalog.lab.knobValue
+import com.retrocam.catalog.lab.withKnob
 import com.retrocam.catalog.lab.LabTemplates
 import com.retrocam.catalog.lab.SavedRecipe
 import com.retrocam.ui.components.ButtonSize
@@ -186,18 +189,48 @@ fun FilterLabPanel(
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
         } else {
-            LabAdjustments.RANGES.forEachIndexed { i, k ->
-                val v = when (i) {
-                    0 -> recipe.adjustments.brightness
-                    1 -> recipe.adjustments.contrast
-                    2 -> recipe.adjustments.saturation
-                    3 -> recipe.adjustments.warmth
-                    4 -> recipe.adjustments.tint
-                    5 -> recipe.gamma
-                    6 -> recipe.splitAmount
-                    else -> k.neutral
+            // Every group is driven from the flat LabKnob list, so the display
+            // order and the storage order are two views of one enum rather than
+            // two tables that have to be kept in step. A group the preset has
+            // touched expands itself, because that is the group the user came
+            // here to check; one the preset left alone stays closed.
+            var openGroups by remember { mutableStateOf(setOf<String>()) }
+            LAB_KNOB_GROUPS.forEach { group ->
+                val indices = group.knobs.mapNotNull { k ->
+                    LabKnob.entries.indexOfFirst { it.label == k.label }.takeIf { it >= 0 }
                 }
-                LabSlider(k.label, v, k.min, k.max, accent, dim, { onKnob(i, it) }, neutral = k.neutral, onReset = { onResetKnob(i) })
+                if (indices.isEmpty()) return@forEach
+                val ranges = group.knobs.zip(indices)
+                val anySet = ranges.any { (k, i) -> recipe.knobValue(LabKnob.entries[i]) != k.neutral }
+                val open = anySet || group.title in openGroups
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { openGroups = openGroups.toggle(group.title) }
+                        .padding(top = 8.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        group.title,
+                        fontFamily = AppType.Sans, fontSize = 10.sp,
+                        color = if (anySet) dim else dim.copy(alpha = 0.55f),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        if (open) "HIDE" else "SHOW",
+                        fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                    )
+                }
+                if (open) {
+                    ranges.forEach { (k, i) ->
+                        LabSlider(
+                            k.label, recipe.knobValue(LabKnob.entries[i]), k.min, k.max, accent, dim,
+                            { onKnob(i, it) },
+                            neutral = k.neutral,
+                            onReset = { onResetKnob(i) },
+                        )
+                    }
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 ShadcnButton(
@@ -1053,6 +1086,10 @@ private fun XmpLine(
         color = if (mark == "x") dim else MaterialTheme.colorScheme.onSurface,
     )
 }
+
+/** Adds or removes [t], for a collapsible group's open state. */
+private fun Set<String>.toggle(t: String): Set<String> =
+    if (t in this) this - t else this + t
 
 /**
  * The whole report as plain text, for pasting into an issue or a note.
