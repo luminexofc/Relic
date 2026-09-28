@@ -19,7 +19,14 @@ import com.retrocam.catalog.lab.LabRecipe
 import com.retrocam.catalog.lab.LabPrimitives
 import com.retrocam.catalog.lab.LabStage
 import com.retrocam.catalog.lab.MaskShape
+import com.retrocam.catalog.lab.neutral
+import com.retrocam.catalog.lab.withBw
+import com.retrocam.catalog.lab.withCal
+import com.retrocam.catalog.lab.withDefringe
 import com.retrocam.catalog.lab.withEffect
+import com.retrocam.catalog.lab.withGrade
+import com.retrocam.catalog.lab.withHsl
+import com.retrocam.catalog.lab.withKnob
 import com.uvstudio.him.photofilterlibrary.FilterEngine
 import com.retrocam.data.SettingsRepository
 import com.retrocam.renderer.FilterRenderer
