@@ -143,18 +143,22 @@ class XmpImportTest {
     /**
      * The *2012 key names arrived with Process Version 3 (Lightroom 4) and every
      * version since still writes them, so a preset tagged 5.0 is modern. Only 1.x
-     * and 2.x are legacy. Getting this backwards reads a modern preset's
-     * unprefixed keys as absent, or worse, reads a legacy 0-255 contrast as if it
-     * were already on the -100..100 scale.
+     * and 2.x are legacy.
+     *
+     * The SCALE belongs to the key, not to ProcessVersion. `Contrast` is 0-255
+     * about 128 and `Contrast2012` is -100..100, so a file carrying the
+     * unprefixed key is read on the legacy scale whichever version it claims.
+     * The old reader inferred the scale from ProcessVersion and consequently
+     * threw away a perfectly good legacy contrast value from any file that
+     * mentioned a modern process version.
      */
     @Test
-    fun `process version 3 and above is a modern preset`() {
+    fun `the scale comes from the key name, not from ProcessVersion`() {
         for (v in listOf("3.0", "5.0", "6.6", "11.0", "15.0")) {
-            val rec = XmpImport.parse("""crs:ProcessVersion="$v" crs:Contrast="138"""").recipe
-            // Unprefixed Contrast must be ignored outright, not coerced.
-            assertEquals("PV $v", 1f, rec.adjustments.contrast, 1e-4f)
+            val legacy = XmpImport.parse("""crs:ProcessVersion="$v" crs:Contrast="138"""").recipe
+            assertEquals("PV $v legacy scale", 1.1f, legacy.adjustments.contrast, 1e-3f)
             val modern = XmpImport.parse("""crs:ProcessVersion="$v" crs:Contrast2012="+10"""").recipe
-            assertEquals("PV $v", 1.1f, modern.adjustments.contrast, 1e-3f)
+            assertEquals("PV $v 2012 scale", 1.1f, modern.adjustments.contrast, 1e-3f)
         }
     }
 
@@ -353,6 +357,56 @@ class XmpImportTest {
         assertNull(res.ignored.firstOrNull { it.key == "HasSettings" })
     }
 
+    // ---- renamed keys ----
+
+    /**
+     * Adobe renamed several settings between Process Versions, and the reader
+     * only knew the new names. A preset using the old names therefore lost all
+     * three of its sharpening parameters, its clarity and its grain
+     * distribution while reporting every one of them as "no Lab equivalent" -
+     * which is the exact opposite of true and the reason a real preset read as
+     * 9% covered.
+     */
+    @Test
+    fun `the old key names are read, not treated as unknown`() {
+        val res = XmpImport.parse(
+            """
+            crs:Clarity2012="+8" crs:SharpenRadius="0.8" crs:SharpenDetail="25"
+            crs:SharpenEdgeMasking="40" crs:GrainFrequency="40" crs:VignetteAmount="-22"
+            crs:Exposure="+0.5" crs:Contrast="128" crs:Temperature="9000"
+            """.trimIndent(),
+        )
+        assertEquals("no key should be reported as unknown", 0, res.ignored.size)
+        val r = res.recipe
+        assertEquals(0.08f, r.clarity, 1e-3f)
+        assertEquals(0.8f, r.sharpRadius, 1e-3f)
+        assertEquals(0.25f, r.detail, 1e-3f)
+        assertEquals(0.4f, r.masking, 1e-3f)
+        assertEquals(0.4f, r.grainRough, 1e-3f)
+        assertEquals(0.22f, r.vignette, 1e-3f)
+        // Exposure +0.5 EV: gamma = 2^0.5
+        assertEquals(1.4142f, r.gamma, 1e-3f)
+        // Contrast 128 is exactly neutral on the legacy scale.
+        assertEquals(1f, r.adjustments.contrast, 1e-4f)
+        assertTrue(r.adjustments.warmth > 0f)
+    }
+
+    /** The report has to name the key the file used, not the one we wished for. */
+    @Test
+    fun `the report names the key the file actually used`() {
+        val res = XmpImport.parse("""crs:SharpenEdgeMasking="40"""")
+        assertTrue(res.applied.any { it.key == "SharpenEdgeMasking" })
+        assertTrue(res.applied.none { it.key == "Masking" })
+    }
+
+    /** Both families present: the 2012 key wins, which is what Adobe means. */
+    @Test
+    fun `the newer name wins when a file carries both`() {
+        val res = XmpImport.parse("""crs:Clarity="+5" crs:Clarity2012="+40"""")
+        assertEquals(0.4f, res.recipe.clarity, 1e-3f)
+        assertTrue(res.applied.any { it.key == "Clarity2012" })
+    }
+
     /**
      * Two parses in a row must not share state. An earlier version kept its
      * accumulators on the object, so a preset that set no gamma would inherit
@@ -381,15 +435,76 @@ class XmpImportTest {
     /**
      * A percentage is only useful if it is not always 100 and not always 0, so
      * these pin both ends and the arithmetic between them.
+     *
+     * The denominator is the look settings, NOT every attribute in the file. A
+     * preset reporting 9% while reproducing nearly all of its actual settings
+     * was measuring how verbose XMP is, not how good the import is.
      */
     @Test
-    fun `coverage counts keys, not visual weight, and says so`() {
+    fun `coverage counts look keys, not visual weight, and says so`() {
         val res = XmpImport.parse(modern)
-        val expected = res.applied.size * 100 / res.keys.size
+        val expected = res.applied.size * 100 / res.lookKeys.size
         assertEquals(expected, res.coveragePercent)
         assertTrue("coverage should be partial for a real preset", res.coveragePercent in 1..99)
-        assertEquals(res.exact.size * 100 / res.keys.size, res.exactPercent)
+        assertEquals(res.exact.size * 100 / res.lookKeys.size, res.exactPercent)
         assertTrue("exact should not exceed total", res.exactPercent <= res.coveragePercent)
+    }
+
+    /**
+     * The headline number has to be about the picture. Every key a preset sets
+     * to zero is honoured, and a capability flag is not scored as a failure, so
+     * a preset whose look settings we all handle reports full coverage even
+     * though its file lists a hundred attributes.
+     */
+    @Test
+    fun `a real preset is not scored on the keys that are not a look`() {
+        val res = XmpImport.parse(
+            """
+            crs:Contrast2012="+12" crs:Exposure2012="+0.25" crs:Highlights2012="-40"
+            crs:Shadows2012="+38" crs:Whites2012="-20" crs:Blacks2012="+10"
+            crs:Saturation="-2" crs:Vibrance="+10" crs:Clarity2012="+8"
+            crs:GrainAmount="6" crs:GrainSize="11" crs:GrainFrequency="40"
+            crs:SharpenRadius="0.8" crs:SharpenDetail="25" crs:SharpenEdgeMasking="40"
+            crs:ProcessVersion="11.0" crs:PresetType="Normal"
+            crs:SupportsColor="True" crs:SupportsMonochrome="False"
+            crs:Copyright="Someone" crs:ContactInfo="x" crs:Version="15.0"
+            crs:CameraModelRestriction="all" crs:AutoLateralCA="True"
+            crs:PerspectiveVertical="12" crs:LensProfileEnable="False"
+            crs:LensProfileSetup="0" crs:CameraProfile="Adobe Standard"
+            crs:HasSettings="True" crs:Name="my preset"
+            """.trimIndent(),
+        )
+        // Everything above that is a look setting, we handle. Everything above
+        // that is not, is out of the denominator.
+        assertEquals(0, res.ignored.size)
+        assertEquals(100, res.coveragePercent)
+        // And the non-look keys are still visible, not vanished.
+        assertTrue(res.metadata.isNotEmpty())
+        for (k in listOf("Copyright", "PresetType", "PerspectiveVertical", "Name")) {
+            assertTrue("$k should be listed as not-a-look", res.metadata.any { it.key == k })
+        }
+        // 15 of the file's keys are look settings, and we handle all 15.
+        assertEquals(15, res.lookKeys.size)
+    }
+
+    /**
+     * Zero is a value. A preset that says `Exposure2012="0"` has told us its
+     * exposure, and the old reader scored that as a failure to import.
+     */
+    @Test
+    fun `a key set to zero is honoured rather than reported as dropped`() {
+        val res = XmpImport.parse(
+            """crs:Exposure2012="0" crs:Contrast2012="0" crs:Clarity2012="0" """,
+        )
+        assertEquals(0, res.ignored.size)
+        for (k in listOf("Exposure2012", "Contrast2012", "Clarity2012")) {
+            val key = res.exact.firstOrNull { it.key == k }
+            assertTrue("$k should be reported as honoured", key != null)
+            assertEquals("$k neutral", "neutral (0)", key!!.mapsTo)
+        }
+        assertEquals(100, res.coveragePercent)
+        // And the recipe is untouched, because zero really is neutral.
+        assertTrue(res.recipe.isIdentity)
     }
 
     @Test
@@ -415,17 +530,25 @@ class XmpImportTest {
     }
 
     /**
-     * Every key lands in exactly one tier. Two parallel lists could drift; one
-     * tagged list cannot, and this is what proves the tagging is total.
+     * Every key lands in exactly one of the four tiers. Two parallel lists
+     * could drift; one tagged list cannot, and this is what proves the tagging
+     * is total.
      */
     @Test
     fun `every key is in exactly one tier and the views partition them`() {
         val res = XmpImport.parse(modern)
-        assertEquals(res.keys.size, res.exact.size + res.approximate.size + res.ignored.size)
+        assertEquals(
+            res.keys.size,
+            res.exact.size + res.approximate.size + res.ignored.size + res.metadata.size,
+        )
         assertEquals(res.applied.size, res.exact.size + res.approximate.size)
         assertTrue(res.exact.none { it.reason != null })
         assertTrue(res.ignored.all { it.mapsTo == null })
         assertTrue(res.applied.all { it.mapsTo != null && it.mapsTo.isNotBlank() })
+        // lookKeys is applied plus the unsupported ones, and excludes the
+        // not-a-look tier entirely.
+        assertEquals(res.applied.size + res.ignored.size, res.lookKeys.size)
+        assertEquals(res.keys.size - res.metadata.size, res.lookKeys.size)
     }
 
     @Test

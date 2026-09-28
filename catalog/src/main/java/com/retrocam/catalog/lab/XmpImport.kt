@@ -17,6 +17,16 @@ enum class Fidelity {
 
     /** No Lab equivalent. [XmpKey.reason] says why. */
     UNSUPPORTED,
+
+    /**
+     * Read, reported, and deliberately outside the coverage percentage.
+     *
+     * `SupportsColor`, `Copyright`, `Version`, `PerspectiveVertical` and the
+     * rest. They are in the file and a user reading the report should see them,
+     * but a preset that changes the picture does not depend on any of them, so
+     * counting them as failures made the number meaningless.
+     */
+    NOT_A_LOOK,
 }
 
 /**
@@ -41,14 +51,41 @@ data class XmpKey(
 }
 
 data class XmpResult(val recipe: LabRecipe, val keys: List<XmpKey>) {
-    val applied: List<XmpKey> get() = keys.filter { it.fidelity != Fidelity.UNSUPPORTED }
+    /**
+     * Keys that were mapped onto something.
+     *
+     * Spelled out as two tiers rather than `!= UNSUPPORTED` on purpose: a not-a-look
+     * key IS not unsupported, and filtering on that would list `Copyright` as an
+     * applied setting and push the coverage figure over 100%.
+     */
+    val applied: List<XmpKey>
+        get() = keys.filter { it.fidelity == Fidelity.EXACT || it.fidelity == Fidelity.APPROXIMATE }
     val ignored: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.UNSUPPORTED }
     val exact: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.EXACT }
     val approximate: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.APPROXIMATE }
     val isEmpty: Boolean get() = applied.isEmpty()
 
     /**
-     * How much of this preset the Lab represents, as a whole percentage.
+     * Keys that change the picture, and so are the only honest denominator.
+     *
+     * A Camera Raw file carries ~140 attributes. Around 40 of them change the
+     * image; the rest are camera capability flags, copyright strings, raw
+     * converter inputs and lens geometry. Counting those in the denominator
+     * made a preset that we reproduce almost completely report 9%, which is
+     * not a measurement of anything - it measures how verbose XMP is.
+     *
+     * So the percentage is over the look settings, and the non-look keys are
+     * still listed in the report under [metadata] rather than being dropped
+     * silently. Nothing disappears; it just stops being counted as a failure.
+     */
+    val lookKeys: List<XmpKey> get() = keys.filter { it.fidelity != Fidelity.NOT_A_LOOK }
+
+    /** Read but not a look setting: capability flags, copyright, lens geometry. */
+    val metadata: List<XmpKey> get() = keys.filter { it.fidelity == Fidelity.NOT_A_LOOK }
+
+    /**
+     * How much of this preset's *look* the Lab represents, as a whole
+     * percentage, over [lookKeys].
      *
      * Counts keys, not visual weight, and that is the honest limit of it: one
      * `ToneCurvePV2012` is worth more than four sliders, and a percentage
@@ -56,11 +93,11 @@ data class XmpResult(val recipe: LabRecipe, val keys: List<XmpKey>) {
      * reason, and the report names the unsupported keys so a reader can judge.
      */
     val coveragePercent: Int
-        get() = if (keys.isEmpty()) 0 else applied.size * 100 / keys.size
+        get() = if (lookKeys.isEmpty()) 0 else applied.size * 100 / lookKeys.size
 
     /** The share reproduced exactly, with approximations counted out. */
     val exactPercent: Int
-        get() = if (keys.isEmpty()) 0 else exact.size * 100 / keys.size
+        get() = if (lookKeys.isEmpty()) 0 else exact.size * 100 / lookKeys.size
 }
 
 /**
@@ -82,22 +119,14 @@ data class XmpResult(val recipe: LabRecipe, val keys: List<XmpKey>) {
  *
  * ## What is deliberately not mapped
  *
- * A Camera Raw preset has around forty recognised settings and the Lab has seven
- * knobs. Most are dropped on purpose, and [XmpIgnored] says which and why,
- * because a preset that silently loses its highlights curve is worse than one
- * that admits it. The big ones we do not implement:
+ * A Camera Raw file carries around 140 attributes and about 40 of them change
+ * the picture. The rest are camera capability flags, copyright strings, raw
+ * converter inputs and lens geometry, and they are reported as
+ * [Fidelity.NOT_A_LOOK] rather than counted against the preset.
  *
- *  - `ToneCurvePV2012` and its per-channel variants. A real tone curve is a
- *    lookup table and the Lab has no curve texture. This is the single largest
- *    thing an XMP preset carries, so an import is always an approximation.
- *  - `Highlights2012` / `Whites2012` / `Shadows2012` / `Blacks2012`. These are
- *    range-specific, and folding them into a midtone gamma would lift the whole
- *    image rather than one end of it.
- *  - `Texture` / `Clarity` / `Dehaze`. Local-contrast operators with no analogue.
- *  - `Look`. An enum naming a named curve set, not a number; guessing a mapping
- *    would be inventing behaviour.
- *  - `GrainAmount`, `PostCropVignetteAmount`. The Lab has both effects, but
- *    Adobe's units are their own and the pairing would be guesswork.
+ * Of the keys that do change the picture, the ones with no Lab equivalent are
+ * named in the report with a reason, because a preset that silently loses its
+ * highlights curve is worse than one that admits it.
  */
 object XmpImport {
 
@@ -118,13 +147,112 @@ object XmpImport {
     private fun q(v: Float): String =
         if (v == v.roundToInt().toFloat()) v.roundToInt().toString() else v.toString()
 
-    /** Metadata rather than look: reported as read, but not a knob. */
+    /**
+     * Keys that are in the file but change nothing about the picture.
+     *
+     * Split into two lists on purpose. [SILENT] is historical: keys that were
+     * never worth a line in the report. [NOT_A_LOOK] is everything else that is
+     * not a look setting, and it IS reported, just not counted - a user reading
+     * an import report should be able to see that a preset asked for
+     * `AutoLateralCA` and we did not do it, without that fact being scored
+     * against the preset's fidelity.
+     *
+     * Camera capability flags, provenance strings, raw converter inputs and
+     * lens geometry. None of them survive a JPEG and none of them are a look.
+     */
+    private val NOT_A_LOOK_EXACT = setOf(
+        // Capability flags: what the camera can do, not what the preset wants.
+        "PresetType", "SupportsColor", "SupportsMonochrome", "SupportsHighDynamicRange",
+        "SupportsNormalDynamicRange", "SupportsSceneReferred", "SupportsOutputReferred",
+        "CameraModelRestriction", "HasSettings", "SupportsAmount", "UseToneCurve",
+        "UseLegacyAdobe2012Adjustments", "Cluster", "ClusterName", "UUID",
+        // Provenance.
+        "Version", "Copyright", "ContactInfo", "Name", "Description", "Creator",
+        "ProfileCopyright", "ProfileName", "ToneCurveName", "ProcessVersion",
+        // Crop is framing, not grading, and the Lab does not crop.
+        "CropAmount", "CropTop", "CropLeft", "CropBottom", "CropRight",
+        // Raw converter inputs. Honouring these means DNG profile support.
+        "CameraProfile", "LensProfileEnable", "LensProfileSetup", "LensManualDistortionAmount",
+        "AutoLateralCA", "CalibrationIlluminant1", "CalibrationIlluminant2",
+        "CalibrationHue", "CalibrationSat", "AsShotNeutral",
+    )
+
+    /** Optical geometry: a lens correction, not a grade. */
+    private val NOT_A_LOOK_PREFIXES = listOf(
+        "Perspective", "LensProfile", "CameraCalibration", "WB",
+    )
+
+    /** Historical: never reported at all. A strict subset of NOT_A_LOOK. */
     private val METADATA = setOf(
         "ProcessVersion", "HasSettings", "Cluster", "ClusterName", "UUID",
         "ToneCurveName", "SupportsAmount", "UseToneCurve", "ProfileCopyright",
         "ProfileName", "Description", "Creator", "ExposureCompensation",
-        "AutoBrightness", "CameraProfile", "CropAmount", "ToneCurvePV2012",
+        "AutoBrightness", "CameraProfile", "CropAmount",
     )
+
+    /**
+     * One setting under several names.
+     *
+     * Adobe renamed keys between Process Versions and the old names are still
+     * in files in the wild, and a preset that carries `SharpenRadius` was
+     * silently losing all three of its sharpening parameters because the reader
+     * only knew `SharpnessRadius`. Same for `Clarity`/`Clarity2012` and
+     * `GrainRoughness`/`GrainFrequency`, which are a rename rather than a new
+     * setting. The first name that is present in the file wins.
+     */
+    /**
+     * One setting under several names, newest first.
+     *
+     * Adobe renamed keys between Process Versions and the old names are still in
+     * files in the wild. A preset carrying `SharpenRadius` was silently losing
+     * all three of its sharpening parameters, because the reader only knew
+     * `SharpnessRadius` and then reported it as an unknown key.
+     *
+     * Order is the resolution order, so the canonical name is always the NEWEST
+     * spelling. `Clarity2012` beat `Clarity` for exactly as long as it did not
+     * exist here, which is the failure this table exists to stop.
+     */
+    private val ALIASES: Map<String, List<String>> = mapOf(
+        "Exposure2012" to listOf("Exposure"),
+        "Contrast2012" to listOf("Contrast"),
+        "Temperature" to listOf("ColorTemp"),
+        "Tint" to emptyList(),
+        "Highlights2012" to listOf("Highlights"),
+        "Shadows2012" to listOf("Shadows"),
+        "Whites2012" to listOf("Whites"),
+        "Blacks2012" to listOf("Blacks"),
+        "Texture" to emptyList(),
+        "Clarity2012" to listOf("Clarity"),
+        "Dehaze" to emptyList(),
+        "Saturation" to emptyList(),
+        "Vibrance" to emptyList(),
+        "Sharpness" to emptyList(),
+        "SharpnessRadius" to listOf("SharpenRadius"),
+        "Detail" to listOf("SharpenDetail"),
+        "Masking" to listOf("SharpenEdgeMasking"),
+        "GrainAmount" to emptyList(),
+        "GrainSize" to emptyList(),
+        "GrainRoughness" to listOf("GrainFrequency"),
+        "PostCropVignetteAmount" to listOf("VignetteAmount"),
+        "PostCropVignetteMidpoint" to listOf("VignetteMidpoint"),
+        "PostCropVignetteFeather" to listOf("VignetteFeather"),
+    )
+
+    /**
+     * Resolves a canonical key to the one actually present in [a], or null.
+     *
+     * Returns the canonical name too, because the report has to name the key the
+     * file used, not the one we wished it had used. A preset that says
+     * `SharpenEdgeMasking` and gets a masking slider is a success, but a report
+     * claiming `Masking` was applied would be a lie about the file.
+     */
+    private fun resolve(a: Map<String, String>, canonical: String): Pair<String, String>? {
+        for (name in listOf(canonical) + ALIASES[canonical].orEmpty()) {
+            val v = a[name] ?: continue
+            return name to v
+        }
+        return null
+    }
 
     /** All locals, so two imports cannot bleed into each other. */
     fun parse(xmp: String): XmpResult {
@@ -155,91 +283,116 @@ object XmpImport {
             )
         }
 
+        /**
+         * A key the preset set to zero.
+         *
+         * Zero is a *value*, not an absence, and the earlier reader treated it
+         * as an absence: every block was guarded by `if (v != 0f) add(...)`, so
+         * a preset full of honest zeroes fell through to the "unrecognised key"
+         * loop and got reported as dropped. A file that says `Exposure2012="0"`
+         * was scored as a failure to import an exposure. It is neutral, it was
+         * honoured, and it counts.
+         */
+        fun neutral(key: String, raw: String) {
+            keys += XmpKey(key, raw, Fidelity.EXACT, mapsTo = "neutral (0)")
+        }
+
         fun drop(key: String, reason: String) {
             a[key]?.let { keys += XmpKey(key, it, Fidelity.UNSUPPORTED, reason = reason) }
         }
 
-        // Which key family is present decides the scale, and getting this wrong
-        // is the difference between a +10 contrast tweak and a +1000 one, so it
-        // is resolved first and from the data rather than assumed.
-        val modern = a.containsKey("Contrast2012") || a.containsKey("Exposure2012") ||
-            (num(a["ProcessVersion"]) ?: 0f) >= 3f
+        /**
+         * One numeric look setting, resolved through [resolve], with the zero
+         * case handled once instead of fifteen times.
+         *
+         * [f] runs only for a non-zero value and is expected to set the
+         * accumulator; the report line is written either way. Collapsing these
+         * into one helper is not tidiness for its own sake: fifteen hand-written
+         * copies of "look it up, skip if zero, record it" is exactly the shape
+         * of drift, and they had already drifted.
+         *
+         * [f] receives the key name that actually matched, not the canonical
+         * one, because the scale belongs to the key rather than to the file:
+         * `Contrast` is 0-255 about 128 and `Contrast2012` is -100..100, and no
+         * amount of ProcessVersion guessing changes that.
+         *
+         * [isNeutralAtZero] is for the keys whose neutral is not zero, i.e. the
+         * ones Adobe centres (GrainSize and the two vignette parameters sit at
+         * 50, not 0).
+         */
+        fun knob(
+            canonical: String,
+            mapsTo: String,
+            approx: Boolean = false,
+            isNeutralAtZero: Float = 0f,
+            f: (String, Float) -> Unit,
+        ) {
+            val (name, raw) = resolve(a, canonical) ?: return
+            val v = num(raw) ?: return
+            if (v == isNeutralAtZero) {
+                neutral(name, raw)
+                return
+            }
+            f(name, v)
+            add(name, q(v), mapsTo, approx)
+        }
 
         // ---- exposure -> gamma ----
         // Exposure is a multiplicative stop count and gamma is a power curve,
         // the only multiplicative knob available. brightness looks like the
         // natural home but it is an additive 0-255 offset inside the 4x5 matrix,
         // so mapping a stop count onto it would move blacks.
-        val expKey = if (modern) "Exposure2012" else "Exposure"
-        num(a[expKey])?.let { e ->
-            if (e != 0f) {
-                // 1 EV is a doubling, and out = in^(1/gamma) doubles brightness at
-                // gamma = 2, so gamma = 2^stops is the natural correspondence.
-                gamma = Math.pow(2.0, e.toDouble()).toFloat().coerceIn(0.2f, 3f)
-                add(expKey, q(e), "GAMMA = ${q(gamma)}", approx = true)
-            }
+        knob("Exposure2012", "GAMMA", approx = true) { _, e ->
+            // 1 EV is a doubling, and out = in^(1/gamma) doubles brightness at
+            // gamma = 2, so gamma = 2^stops is the natural correspondence.
+            gamma = Math.pow(2.0, e.toDouble()).toFloat().coerceIn(0.2f, 3f)
         }
 
         // ---- contrast -> contrast ----
-        val cKey = if (modern) "Contrast2012" else "Contrast"
-        num(a[cKey])?.let { c ->
-            // Process 1 and 2 stored contrast as 0-255 about 128, the 2012
-            // family as -100..100. Re-centring the legacy value onto 128 puts
-            // both families on one scale so a single divide applies. The legacy
-            // range is really +/-128 and this treats it as +/-100, which is a
-            // slight under-read of an extreme legacy contrast and is preferable
-            // to rescaling and moving the neutral.
-            val normalised = if (modern) c else (c - 128f)
-            if (normalised != 0f) {
-                contrast = (1f + normalised / 100f).coerceIn(0f, 3f)
-                add(cKey, q(c), "CONTRAST = ${q(contrast)}")
-            }
+        knob("Contrast2012", "CONTRAST") { name, c ->
+            // The scale is decided by which key the file used, not by
+            // ProcessVersion. `Contrast` is 0-255 about 128 whatever the
+            // process version claims; `Contrast2012` is -100..100. Re-centring
+            // the legacy value onto 128 puts both families on one scale so a
+            // single divide applies. The legacy range is really +/-128 and this
+            // treats it as +/-100, which is a slight under-read of an extreme
+            // legacy contrast and is preferable to rescaling and moving the
+            // neutral.
+            val normalised = if (name.endsWith("2012")) c else (c - 128f)
+            contrast = (1f + normalised / 100f).coerceIn(0f, 3f)
         }
 
         // ---- saturation, from Saturation and Vibrance together ----
         // Lightroom applies both, and Vibrance protects skin tones, so they
         // multiply rather than one replacing the other. A preset that sets only
         // Vibrance still does something.
-        num(a["Saturation"])?.let { s ->
-            if (s != 0f) {
-                saturation *= 1f + s / 100f
-                add("Saturation", q(s), "SATURATION")
-            }
-        }
-        num(a["Vibrance"])?.let { v ->
-            if (v != 0f) {
-                saturation *= 1f + v / 100f
-                add("Vibrance", q(v), "SATURATION", approx = true)
-            }
-        }
+        knob("Saturation", "SATURATION") { _, v -> saturation *= 1f + v / 100f }
+        knob("Vibrance", "SATURATION", approx = true) { _, v -> saturation *= 1f + v / 100f }
         saturation = saturation.coerceIn(0f, 3f)
 
         // ---- sharpness -> the sharpen effect ----
-        num(a["Sharpness"])?.let { sh ->
-            if (sh != 0f) {
-                sharpen = (sh / 100f).coerceIn(0f, 1f)
-                add("Sharpness", q(sh), "SHARPEN = ${q(sharpen)}")
-            }
-        }
+        knob("Sharpness", "SHARPEN") { _, v -> sharpen = (v / 100f).coerceIn(0f, 1f) }
 
         // ---- colour temperature -> warmth ----
         // Kelvin is absolute and warmth is a -1..1 opinion, so the pivot is
         // Adobe's own 5500K reference and the scale is logarithmic: 2000K to
         // 5000K is one step to a person, 5000K to 50000K is barely one.
-        num(a["ColorTemp"])?.let { k ->
-            if (k > 0f) {
-                warmth = (ln(k / 5500.0) / ln(9.0)).toFloat().coerceIn(-1f, 1f)
-                add("ColorTemp", q(k), "WARMTH = ${q(warmth)}", approx = true)
+        val tempResolved = resolve(a, "Temperature")
+        if (tempResolved != null) {
+            val (tempKey, tempRaw) = tempResolved
+            val k = num(tempRaw)
+            when {
+                k == null -> drop(tempKey, "not a number")
+                k <= 0f -> neutral(tempKey, tempRaw)
+                else -> {
+                    warmth = (ln(k / 5500.0) / ln(9.0)).toFloat().coerceIn(-1f, 1f)
+                    add(tempKey, q(k), "WARMTH = ${q(warmth)}", approx = true)
+                }
             }
         }
 
         // ---- tint: a direct match, both are -1..1 magenta-to-green ----
-        num(a["Tint"])?.let { t ->
-            if (t != 0f) {
-                tint = (t / 100f).coerceIn(-1f, 1f)
-                add("Tint", q(t), "TINT = ${q(tint)}")
-            }
-        }
+        knob("Tint", "TINT") { _, v -> tint = (v / 100f).coerceIn(-1f, 1f) }
 
         // ---- tone curve: the single largest thing a preset carries ----
         // Composite plus per-channel, packed into one recipe field. Look is
@@ -273,89 +426,60 @@ object XmpImport {
             Triple("Whites2012", "Whites", 2),
             Triple("Blacks2012", "Blacks", 3),
         ).forEach { (modernKey, legacyKey, slot) ->
-            val key = if (modern && modernKey in a) modernKey else legacyKey
-            val v = num(a[key]) ?: return@forEach
-            if (v == 0f) return@forEach
-            val m = (v / 100f).coerceIn(-1f, 1f)
+            var m: Float? = null
+            knob(modernKey, legacyKey.uppercase()) { _, v -> m = (v / 100f).coerceIn(-1f, 1f) }
             ranges[slot] = m
-            add(key, q(v), "${legacyKey.uppercase()} = ${q(m)}")
         }
 
         // ---- local contrast: Texture, Clarity, Dehaze, all -100..100 ----
+        // The label is the knob, not the key, because `Clarity2012` is the key
+        // and CLARITY is the thing it drives.
         val local = arrayOfNulls<Float>(3)
-        listOf("Texture" to 0, "Clarity" to 1, "Dehaze" to 2).forEach { (key, slot) ->
-            val v = num(a[key]) ?: return@forEach
-            if (v == 0f) return@forEach
-            val m = (v / 100f).coerceIn(-1f, 1f)
-            local[slot] = m
-            add(key, q(v), "${key.uppercase()} = ${q(m)}")
+        listOf(
+            Triple("Texture", "TEXTURE", 0),
+            Triple("Clarity2012", "CLARITY", 1),
+            Triple("Dehaze", "DEHAZE", 2),
+        ).forEach { (key, label, slot) ->
+            knob(key, label) { _, v -> local[slot] = (v / 100f).coerceIn(-1f, 1f) }
         }
 
         // ---- operator parameters, the small ones that change the look a lot ----
         // SharpnessRadius, Detail and Masking. Masking is the important one: it
         // is a threshold on the local difference, and without it a preset tuned
         // to a threshold rings every flat patch of sky.
-        num(a["SharpnessRadius"])?.let {
-            val r = it.coerceIn(0.5f, 3f)
-            sharpRadius = r
-            add("SharpnessRadius", q(it), "SHARP RADIUS = ${q(r)}", approx = true)
+        //
+        // Radius has no zero to treat as neutral - Adobe's default is 1.0 and a
+        // file that says 1.0 has told us its radius, which is worth reporting.
+        knob("SharpnessRadius", "SHARP RADIUS", approx = true) { _, v ->
+            sharpRadius = v.coerceIn(0.5f, 3f)
         }
-        num(a["Detail"])?.let {
-            if (it != 0f) {
-                val d = (it / 100f).coerceIn(0f, 1f)
-                detail = d
-                add("Detail", q(it), "DETAIL = ${q(d)}")
-            }
-        }
-        num(a["Masking"])?.let {
-            if (it != 0f) {
-                val m = (it / 100f).coerceIn(0f, 1f)
-                masking = m
-                add("Masking", q(it), "MASKING = ${q(m)}")
-            }
-        }
+        knob("Detail", "DETAIL") { _, v -> detail = (v / 100f).coerceIn(0f, 1f) }
+        knob("Masking", "MASKING") { _, v -> masking = (v / 100f).coerceIn(0f, 1f) }
 
         // ---- grain distribution, and the vignette falloff ----
         // GrainAmount maps onto the Lab's own grain, which is the one thing the
         // earlier "units differ" note was wrong about: the range is the same, it
         // is the distribution that needed real parameters, and those are above.
-        num(a["GrainAmount"])?.let {
-            if (it != 0f) {
-                grain = (it / 100f).coerceIn(0f, 1f)
-                add("GrainAmount", q(it), "GRAIN = ${q(grain)}")
-            }
-        }
-        num(a["GrainSize"])?.let {
+        knob("GrainAmount", "GRAIN") { _, v -> grain = (v / 100f).coerceIn(0f, 1f) }
+        knob("GrainSize", "GRAIN SIZE", approx = true, isNeutralAtZero = 50f) { _, v ->
             // Adobe's GrainSize is 0..100, 50 neutral; the Lab's is a 0.5..3
             // multiplier, so the scale is remapped rather than divided.
-            val sz = (0.5f + (it / 100f) * 2.5f).coerceIn(0.5f, 3f)
-            grainSize = sz
-            add("GrainSize", q(it), "GRAIN SIZE = ${q(sz)}", approx = true)
+            grainSize = (0.5f + (v / 100f) * 2.5f).coerceIn(0.5f, 3f)
         }
-        num(a["GrainRoughness"])?.let {
-            val r = (it / 100f).coerceIn(0f, 1f)
-            grainRough = r
-            add("GrainRoughness", q(it), "GRAIN ROUGH = ${q(r)}", approx = true)
+        knob("GrainRoughness", "GRAIN ROUGH", approx = true, isNeutralAtZero = 50f) { _, v ->
+            grainRough = (v / 100f).coerceIn(0f, 1f)
         }
         // Midpoint and Feather are 0..100 with 50 neutral. Roundness and Aspect
         // change the shape of the falloff rather than its strength and are not
         // implemented; they are reported as dropped below.
-        num(a["PostCropVignetteMidpoint"])?.let {
-            val v = (it / 100f).coerceIn(0f, 1f)
-            vigMid = v
-            add("PostCropVignetteMidpoint", q(it), "VIGNETTE MIDPOINT = ${q(v)}", approx = true)
+        knob("PostCropVignetteMidpoint", "VIGNETTE MIDPOINT", approx = true, isNeutralAtZero = 50f) { _, v ->
+            vigMid = (v / 100f).coerceIn(0f, 1f)
         }
-        num(a["PostCropVignetteFeather"])?.let {
-            val v = (it / 100f).coerceIn(0f, 1f)
-            vigFeather = v
-            add("PostCropVignetteFeather", q(it), "VIGNETTE FEATHER = ${q(v)}", approx = true)
+        knob("PostCropVignetteFeather", "VIGNETTE FEATHER", approx = true, isNeutralAtZero = 50f) { _, v ->
+            vigFeather = (v / 100f).coerceIn(0f, 1f)
         }
-        num(a["PostCropVignetteAmount"])?.let {
-            if (it != 0f) {
-                val v = (kotlin.math.abs(it) / 100f).coerceIn(0f, 1f)
-                vignette = v
-                add("PostCropVignetteAmount", q(it), "VIGNETTE = ${q(v)}", approx = true)
-            }
+        knob("PostCropVignetteAmount", "VIGNETTE", approx = true) { _, v ->
+            vignette = (kotlin.math.abs(v) / 100f).coerceIn(0f, 1f)
         }
 
         // ---- everything else, reported rather than silently dropped ----
@@ -364,15 +488,21 @@ object XmpImport {
             drop(k, "changes the falloff shape, not its strength; not implemented")
         }
 
-        drop("ToneCurveName", "a named curve set, not a value")
         drop("Look", "an enum naming a curve set; no honest mapping")
 
         // Anything else in the file is listed too, so the report is a real
         // inventory of the preset rather than a fixed list with holes in it.
+        // What decides the tier now is [notALook], not "we have never heard of
+        // it": an unrecognised key that is plainly a look setting is a genuine
+        // gap and is scored as one.
         val seen = keys.map { it.key }.toSet()
         for ((k, v) in a) {
             if (k in seen || k in METADATA) continue
-            keys += XmpKey(k, v, Fidelity.UNSUPPORTED, reason = "not a look setting")
+            if (k in NOT_A_LOOK_EXACT || NOT_A_LOOK_PREFIXES.any { k.startsWith(it) }) {
+                keys += XmpKey(k, v, Fidelity.NOT_A_LOOK, reason = "not a look setting")
+            } else {
+                keys += XmpKey(k, v, Fidelity.UNSUPPORTED, reason = "no Lab equivalent yet")
+            }
         }
 
         return XmpResult(

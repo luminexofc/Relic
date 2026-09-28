@@ -997,11 +997,23 @@ private fun XmpReportBlock(
             result.ignored.forEach { k ->
                 XmpLine(mark = "x", k.key, k.value, k.reason, dim)
             }
+            // Shown, but not scored. A preset that asks for SupportsColor and
+            // Copyright has not been imported worse for it, and counting those
+            // in the denominator is what made a real preset report 9% covered.
+            Text(
+                "NOT A LOOK SETTING  ${result.metadata.size}  (not counted)",
+                fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+            )
+            result.metadata.forEach { k ->
+                XmpLine(mark = "-", k.key, k.value, k.reason, dim)
+            }
             Spacer(Modifier.height(6.dp))
             Text(
-                "= exact, ~ close but not the same operation, x dropped. The " +
-                    "percentage counts keys, not visual weight: one tone curve is " +
-                    "worth more than four sliders, and a number cannot say so.",
+                "= exact, ~ close but not the same operation, x dropped, - not a " +
+                    "look setting and not counted. The percentage is over the " +
+                    "preset's look settings only. It counts keys, not visual " +
+                    "weight: one tone curve is worth more than four sliders, and a " +
+                    "number cannot say so.",
                 fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1053,10 +1065,15 @@ private fun reportText(r: com.retrocam.catalog.lab.XmpResult): String = buildStr
     append("RetroCam XMP import: ${r.coveragePercent}% covered ")
     append("(${r.exact.size} exact, ${r.approximate.size} approximate, ")
     append("${r.ignored.size} not supported)\n")
+    append("Percentages are over the ${r.lookKeys.size} keys in this preset that ")
+    append("change the picture. The ${r.metadata.size} keys below that are not look ")
+    append("settings are listed but not counted.\n")
     append("\nAPPLIED (${r.exact.size} exact)\n")
     r.exact.forEach { append("  ${it.key} = ${it.value}  ->  ${it.mapsTo}\n") }
     append("\nAPPROXIMATE (${r.approximate.size})\n")
     r.approximate.forEach { append("  ${it.key} = ${it.value}  ->  ${it.mapsTo}\n") }
     append("\nNOT SUPPORTED (${r.ignored.size}) - the work list\n")
     r.ignored.forEach { append("  ${it.key}: ${it.reason}\n") }
+    append("\nNOT A LOOK SETTING (${r.metadata.size}) - not counted\n")
+    r.metadata.forEach { append("  ${it.key}: ${it.reason}\n") }
 }
