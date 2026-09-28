@@ -690,8 +690,21 @@ class CameraViewModel @Inject constructor(
         return lutStore.all()
     }
 
+    /**
+     * Selects a LUT, or clears it.
+     *
+     * Selecting the LUT that is already selected also clears it. Both that and an
+     * explicit NONE exist because one way of turning something off is a way of
+     * getting stuck with it on.
+     */
     fun setLabLut(id: String?) {
         pendingSelectedRecipe = null
+        if (id != null && id == _uiState.value.labRecipe.lutId) {
+            _uiState.update {
+                it.copy(labRecipe = it.labRecipe.copy(lutId = null, lutAmount = 0f))
+            }
+            return
+        }
         _uiState.update {
             it.copy(
                 labRecipe = it.labRecipe.copy(

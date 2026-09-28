@@ -305,9 +305,14 @@ fun LabScreen(viewModel: CameraViewModel) {
             luts = remember(state.labLutTick) { viewModel.labLuts() },
             onPickLut = { id ->
                 viewModel.setLabLut(id)
-                viewModel.uploadLut(id, renderer)
+                // Null means "no LUT"; there is nothing to upload for it.
+                if (id != null) viewModel.uploadLut(id, renderer)
             },
-            onImportLut = { lutPicker.launch("image/*") },
+            // No mime filter: a .cube is text, so providers hand it back as
+            // text/xml, application/octet-stream or nothing at all, and
+            // filtering would hide the file rather than fail usefully. LutStore
+            // sniffs the bytes instead.
+            onImportLut = { lutPicker.launch("*/*") },
             onLutAmount = viewModel::setLabLutAmount,
             palette = palette,
             watermarks = watermarks,
@@ -334,6 +339,14 @@ fun LabScreen(viewModel: CameraViewModel) {
             xmpReport = state.xmpReport,
             onImportXmp = { xmpPicker.launch("*/*") },
             onDismissReport = viewModel::clearXmpReport,
+            onCopyReport = { text ->
+                // The clipboard is the point: the missing scopes are the list of
+                // what a future version has to implement, and a report you can
+                // only photograph is a report nobody acts on.
+                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("RetroCam XMP report", text))
+                Feedback.info(context, "Report copied")
+            },
             onDeleteLut = viewModel::deleteLut,
             onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,

@@ -1146,16 +1146,19 @@ private fun ModeRow(mode: String, onMode: (String) -> Unit) {
         Modifier
             .fillMaxWidth()
             // Side margins so the control is a bar rather than a full-bleed band.
-            // It keeps the equal-weight split below, so this narrows the group
-            // without moving the centre.
-            .padding(horizontal = 40.dp, vertical = 4.dp),
+            .padding(horizontal = 24.dp, vertical = 4.dp),
+        // Content-sized pills, centred. Not weight(1f): equal weights divide the
+        // row evenly including the dividers, which left each label too narrow and
+        // wrapped "Video" onto two lines. A hard width was the original sin here
+        // too - it fought the centring instead of fixing it.
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ModePill("Video", active = mode == "video", onClick = { onMode("video") }, modifier = Modifier.weight(1f))
+        ModePill("Video", active = mode == "video", onClick = { onMode("video") })
         ModeDivider()
-        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") }, modifier = Modifier.weight(1f))
+        ModePill("Photo", active = mode == "photo", onClick = { onMode("photo") })
         ModeDivider()
-        ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") }, modifier = Modifier.weight(1f))
+        ModePill("Lab", active = mode == "lab", onClick = { onMode("lab") })
     }
 }
 
@@ -1174,7 +1177,7 @@ private fun ModeDivider() {
     // centring it, and a 1dp target is exactly the kind of thing worth being
     // unambiguous about.
     Box(
-        Modifier.width(22.dp),
+        Modifier.width(18.dp),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -1197,6 +1200,10 @@ private fun ModePill(
         text = label,
         fontFamily = AppType.Sans,
         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        // "Video" wrapped to "Vide / o" when the pills were weight-shared and
+        // narrow. A mode name is one word and must not break.
+        maxLines = 1,
+        softWrap = false,
         color = if (active) MaterialTheme.colorScheme.primary
         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
         modifier = modifier

@@ -88,7 +88,7 @@ fun FilterLabPanel(
     onEffect: (Int, Float) -> Unit,
     onDuoColour: (Boolean, Int) -> Unit,
     luts: List<LutStore.Entry>,
-    onPickLut: (String) -> Unit,
+    onPickLut: (String?) -> Unit,
     onImportLut: () -> Unit,
     onLutAmount: (Float) -> Unit,
     palette: List<Int>,
@@ -116,6 +116,7 @@ fun FilterLabPanel(
     xmpReport: com.retrocam.catalog.lab.XmpResult?,
     onImportXmp: () -> Unit,
     onDismissReport: () -> Unit,
+    onCopyReport: (String) -> Unit,
     onDeleteLut: (String) -> Unit,
     onDeleteWatermark: (String) -> Unit,
     selectedRecipeId: String?,
@@ -180,7 +181,7 @@ fun FilterLabPanel(
                     fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
                 )
             }
-            xmpReport?.let { XmpReportBlock(it, accent, dim, onDismissReport) }
+            xmpReport?.let { XmpReportBlock(it, accent, dim, onDismissReport, onCopyReport) }
             TemplateCarousel(recipe.templateId, accent, dim, onTemplate)
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
@@ -240,6 +241,15 @@ fun FilterLabPanel(
                 )
             }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item(key = "lut_none") {
+                    TemplateChip(
+                        label = "NONE",
+                        selected = recipe.lutId == null,
+                        accent = accent,
+                        dim = dim,
+                        onClick = { onPickLut(null) },
+                    )
+                }
                 items(luts, key = { it.id }) { e ->
                     // Imported LUTs are deletable; the generated ones are not, so
                     // they get no long-press handler at all.
@@ -940,6 +950,7 @@ private fun XmpReportBlock(
     accent: androidx.compose.ui.graphics.Color,
     dim: androidx.compose.ui.graphics.Color,
     onDismiss: () -> Unit,
+    onCopy: (String) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Column(
@@ -993,12 +1004,24 @@ private fun XmpReportBlock(
                     "worth more than four sliders, and a number cannot say so.",
                 fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
             )
-            ShadcnButton(
-                text = "Dismiss",
-                onClick = onDismiss,
-                variant = ButtonVariant.Ghost,
-                size = ButtonSize.Sm,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Copy is the point of the report: the missing scopes are the
+                // list of what a future version has to implement, and pasting it
+                // somewhere is how that list gets written down. A report you can
+                // only read is a report you have to photograph.
+                ShadcnButton(
+                    text = "Copy report",
+                    onClick = { onCopy(reportText(result)) },
+                    variant = ButtonVariant.Secondary,
+                    size = ButtonSize.Sm,
+                )
+                ShadcnButton(
+                    text = "Dismiss",
+                    onClick = onDismiss,
+                    variant = ButtonVariant.Ghost,
+                    size = ButtonSize.Sm,
+                )
+            }
         }
     }
 }
@@ -1017,4 +1040,23 @@ private fun XmpLine(
         fontFamily = AppType.Sans, fontSize = 9.sp,
         color = if (mark == "x") dim else MaterialTheme.colorScheme.onSurface,
     )
+}
+
+/**
+ * The whole report as plain text, for pasting into an issue or a note.
+ *
+ * The missing keys come first, because that is the list anyone opening this
+ * wants: the coverage number is the summary, the missing scopes are the work
+ * list.
+ */
+private fun reportText(r: com.retrocam.catalog.lab.XmpResult): String = buildString {
+    append("RetroCam XMP import: ${r.coveragePercent}% covered ")
+    append("(${r.exact.size} exact, ${r.approximate.size} approximate, ")
+    append("${r.ignored.size} not supported)\n")
+    append("\nAPPLIED (${r.exact.size} exact)\n")
+    r.exact.forEach { append("  ${it.key} = ${it.value}  ->  ${it.mapsTo}\n") }
+    append("\nAPPROXIMATE (${r.approximate.size})\n")
+    r.approximate.forEach { append("  ${it.key} = ${it.value}  ->  ${it.mapsTo}\n") }
+    append("\nNOT SUPPORTED (${r.ignored.size}) - the work list\n")
+    r.ignored.forEach { append("  ${it.key}: ${it.reason}\n") }
 }

@@ -21,19 +21,36 @@ class HaldIndexTest {
     }
 
     @Test
-    fun `cube size follows upstream's 512 rule`() {
+    /**
+     * The cube is recovered from the side rather than guessed from a threshold.
+     * The old rule was "512 or bigger means 64, anything else means 16", which
+     * silently mislabelled every other size - including the 198px a 33-cube
+     * needs, which is the size most .cube files in the wild convert to.
+     */
+    fun `cube size is recovered from the side, not guessed`() {
         assertEquals(64, LutCatalog.cubeFor(512, 512))
-        assertEquals(64, LutCatalog.cubeFor(1024, 1024))
         assertEquals(16, LutCatalog.cubeFor(64, 64))
-        // Anything else is treated as the small cube, same as upstream.
-        assertEquals(16, LutCatalog.cubeFor(256, 256))
+        assertEquals(33, LutCatalog.cubeFor(198, 198))
+        assertEquals(65, LutCatalog.cubeFor(585, 585))
+        // 0 now means "not indexable", where the old rule answered 16 for
+        // anything and would have indexed garbage.
+        assertEquals(0, LutCatalog.cubeFor(256, 256))
+        assertEquals(0, LutCatalog.cubeFor(500, 500))
+        assertEquals(0, LutCatalog.cubeFor(512, 256))
     }
 
     @Test
-    fun `only the two real Hald sizes are supported`() {
-        assertTrue(LutCatalog.isSupportedSize(512, 512))
-        assertTrue(LutCatalog.isSupportedSize(1024, 1024))
-        assertTrue(LutCatalog.isSupportedSize(64, 64))
+    /**
+     * Widened from "512 or 64 only" when `.cube` import landed. A side is
+     * supported when some cube size produces exactly that side, which covers the
+     * two original Hald sizes and the 198px a 33-cube needs.
+     */
+    fun `a side is supported when some cube size produces exactly it`() {
+        for (cube in listOf(2, 16, 33, 64, 65)) {
+            val side = LutCatalog.gridFor(cube) * cube
+            assertTrue(LutCatalog.isSupportedSize(side, side), "cube $cube side $side")
+        }
+        // Not a cube-derived size, not square, and too small.
         assertTrue(!LutCatalog.isSupportedSize(256, 256))
         assertTrue(!LutCatalog.isSupportedSize(512, 256))
         assertTrue(!LutCatalog.isSupportedSize(32, 32))

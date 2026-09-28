@@ -24,25 +24,42 @@ object LutCatalog {
      * 16-cube (a 4x4 grid of 16px tiles). 64 is what `grid * size` works out to
      * in both cases, and it is all the shader needs.
      */
+    /**
+     * The cube edge an image of this size holds, or 0 if the size is not one the
+     * shader can index.
+     *
+     * Recovered from the side rather than guessed: the cube has to satisfy
+     * `gridFor(cube) * cube == side`, and the sizes that do are unambiguous. The
+     * old two-case guess (512 means 64, everything else means 16) was fine while
+     * only Hald PNGs existed and wrong the moment a 33-cube turned up.
+     */
     fun cubeFor(width: Int, height: Int): Int =
-        if (width >= 512 && height >= 512) 64 else 16
+        if (width == height) CubeLut.cubeFromSide(width) ?: 0 else 0
 
     /** True for the image sizes the shader can actually index. */
-    fun isSupportedSize(width: Int, height: Int): Boolean =
-        (width >= 512 && height >= 512) || (width == 64 && height == 64)
+    fun isSupportedSize(width: Int, height: Int): Boolean = cubeFor(width, height) > 0
 
     /** Human label for the picker. */
-    fun describeSize(width: Int, height: Int): String = when {
-        width >= 512 && height >= 512 -> "64^3 CUBE (512px)"
-        width == 64 && height == 64 -> "16^3 CUBE (64px)"
-        else -> "$width x $height (unsupported)"
+    fun describeSize(width: Int, height: Int): String {
+        val c = cubeFor(width, height)
+        return if (c > 0) "$c^3 CUBE (${width}px)" else "$width x $height (unsupported)"
     }
 
     /**
      * Tiles per row in a Hald image of this cube size: 4 for a 16-cube, 8 for a
-     * 64-cube. Always `sqrt(cube)`, since there are `cube` tiles laid out square.
+     * 64-cube.
+     *
+     * `ceil(sqrt(cube))`, not `round`. There are `cube` tiles laid out in a
+     * `grid * grid` square, so the grid has to hold them: `grid^2 >= cube`.
+     * Rounding only satisfies that when the cube is a perfect square, and
+     * `round(sqrt(17))` is 4, giving 16 slots for 17 tiles, so two colours land
+     * on one texel and the LUT is quietly wrong.
+     *
+     * 16 and 64 are perfect squares, so this changes nothing for the sizes
+     * already supported. It matters for the 17, 25, 33 and 65 cubes that real
+     * `.cube` files ship in, and for 2.
      */
-    fun gridFor(cube: Int): Int = Math.round(Math.sqrt(cube.toDouble())).toInt()
+    fun gridFor(cube: Int): Int = Math.ceil(Math.sqrt(cube.toDouble())).toInt()
 
     /**
      * Where a colour lives in a Hald image, as a texel index.
@@ -61,6 +78,27 @@ object LutCatalog {
      * Colours are 0..255, matching upstream's pixel maths. The shader adds 0.5
      * for the texel centre and divides by the image side.
      */
+    /**
+     * The texel a colour at cube *indices* `r, g, b` lives at, each 0..cube-1.
+     *
+     * This is the shader's own arithmetic with the index substituted for
+     * `floor(c * (cube - 1) + 0.5)`, so it is the only way to lay out a cube
+     * that the shader will then read back correctly.
+     *
+     * It is deliberately not [haldTexel]. That one takes 0-255 and multiplies by
+     * `(cube-1)/255`, and that round trip is lossy for any size that is not a
+     * power of two: for a 33-cube, index 1 maps to 8-bit 7, and 7 maps straight
+     * back to index 0, so two colours land on one texel.
+     */
+    fun indexTexel(r: Int, g: Int, b: Int, cube: Int): Pair<Int, Int> {
+        val grid = gridFor(cube)
+        val tileX = b % grid
+        val tileY = b / grid
+        val x = (tileX * cube + r).coerceIn(0, grid * cube - 1)
+        val y = (tileY * cube + g).coerceIn(0, grid * cube - 1)
+        return x to y
+    }
+
     fun haldTexel(r: Int, g: Int, b: Int, cube: Int): Pair<Int, Int> {
         val grid = gridFor(cube)
         val maxColor = cube - 1
