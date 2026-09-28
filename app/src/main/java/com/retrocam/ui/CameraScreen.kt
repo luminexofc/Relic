@@ -223,14 +223,6 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     var countdown by remember { mutableStateOf<Int?>(null) }
     var optionSheet by remember { mutableStateOf<String?>(null) }
     var showFilters by remember { mutableStateOf(false) }
-    // Filter Lab: import a Hald CLUT. GetContent rather than OpenDocument so the
-    // user is not forced to grant persistent access to a whole provider.
-    val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) viewModel.importLut(uri, renderer)
-    }
-    val markPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) viewModel.importWatermark(uri)
-    }
     val qrPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importRecipe(uri)
     }

@@ -108,9 +108,12 @@ class LabKnobTest {
             assertEquals("neutral mismatch for $label", enum!!.neutral, knob.neutral, 0f)
         }
         // Every scalar LabKnob that has a slider must appear in some group.
-        // (Array groups — mixer, grade, B&W, cal, defringe — have their own UI.)
+        // (Array groups — mixer, grade, B&W, cal, defringe — and the geometry
+        // block have their own UI.)
         val scalarLabels = LabKnob.entries.map { it.label }.toSet() - setOf(
             "BRIGHTNESS", "GAMMA", "SPLIT TONE",
+            "GEO VERTICAL", "GEO HORIZONTAL", "GEO ROTATE", "GEO ASPECT",
+            "GEO SCALE", "GEO X", "GEO Y",
         )
         for (label in scalarLabels) {
             assertTrue("LabKnob $label has no group slider", label in grouped.keys)

@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import com.retrocam.catalog.lab.DateStamp
-import com.retrocam.catalog.lab.LutCatalog
+
 import com.uvstudio.him.photofilterlibrary.FilterEngine
 import java.io.File
 
@@ -153,7 +153,13 @@ class OverlayRaster(context: Context) {
     private fun persist(bmp: Bitmap): Result<Pair<String, String>> {
         val px = IntArray(bmp.width * bmp.height)
         bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
-        val id = "mark_" + LutCatalog.hashPixels(px, bmp.width, 0).removePrefix("lut_")
+        // FNV-1a over the pixels, so re-importing the same logo is a no-op.
+        var h = 14695981039346656037uL
+        for (p in px) {
+            h = h xor p.toULong()
+            h *= 1099511628211uL
+        }
+        val id = "mark_" + h.toString(16).padStart(16, '0')
         val file = File(marks, "$id.png")
         if (!file.exists()) {
             file.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }

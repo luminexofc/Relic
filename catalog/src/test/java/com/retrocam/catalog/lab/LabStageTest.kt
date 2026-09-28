@@ -210,7 +210,7 @@ class LabStageTest {
         val r = SavedRecipe.create("P", "original", LabRecipe(stages = listOf(LabStage("vintage"))))
         val enc = RecipeCodec.encode(r)
         // id, amount, shape, x, y, w, h, feather, params -> 9 fields, the last empty
-        val tok = enc.split(",")[31]
+        val tok = enc.split(",")[29]
         assertEquals(9, tok.split("~").size)
         assertEquals("", tok.split("~")[8])
         assertEquals(LabStage("vintage"), nn(RecipeCodec.decode(enc)).lab.stagesClamped().single())
@@ -275,7 +275,7 @@ class LabStageTest {
     @Test
     fun `a recipe with no stages still encodes to the dash placeholder`() {
         val enc = RecipeCodec.encode(SavedRecipe.create("N", "original", LabRecipe()))
-        assertEquals("-", enc.split(",")[32])
+        assertEquals("-", enc.split(",")[29])
     }
 
     /**
@@ -304,20 +304,19 @@ class LabStageTest {
         f[3] = "-"    // templateId
         f[5] = "1"   // contrast
         f[6] = "1"   // saturation
-        // These three are decoded, not parsed as numbers: a bare "0" here makes
+        // These two are decoded, not parsed as numbers: a bare "0" here makes
         // the base64 stamp decoder throw, and decode swallows it into a null.
-        f[17] = "-"   // lutId
-        f[23] = "-"   // stampText
-        f[27] = "-"   // watermarkId
-        f[31] = stageField
-        f[32] = "-"   // tone curve
+        f[21] = "-"   // stampText
+        f[25] = "-"   // watermarkId
+        f[29] = stageField
+        f[30] = "-"   // tone curve
         // sharpRadius, grainSize default above 0 and vigMid/vigFeather to 0.5.
-        f[40] = "1"
-        f[43] = "1"
-        f[45] = "0.5"
-        f[46] = "0.5"
-        // 33..47 are the tone, local and operator controls.
-        // 40..46 have non-zero defaults, so a zero there must still decode.
+        f[38] = "1"
+        f[41] = "1"
+        f[43] = "0.5"
+        f[44] = "0.5"
+        // 31..44 are the tone, local and operator controls.
+        // 38..44 have non-zero defaults, so a zero there must still decode.
         return f.joinToString(",")
     }
 

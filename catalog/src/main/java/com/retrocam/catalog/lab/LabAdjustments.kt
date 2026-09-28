@@ -167,9 +167,10 @@ data class LabKnobGroup(
  * Every group, in panel order.
  *
  * CURVES is deliberately absent: its knobs are parametric amounts with no
- * LabKnob entries, and the panel renders them in CurvesBlock instead. Listing
- * them here would make the group/slider consistency test demand entries that
- * must not exist.
+ * LabKnob entries, and the panel renders them in CurvesBlock instead. GEOMETRY
+ * is absent for the same reason in reverse: GeoBlock renders the mode buttons
+ * plus the same 7 sliders, so listing them here as well showed two near-
+ * identical geometry sections back to back.
  */
 val LAB_KNOB_GROUPS = listOf(
     LabKnobGroup.LIGHT,
@@ -177,7 +178,6 @@ val LAB_KNOB_GROUPS = listOf(
     LabKnobGroup.EFFECTS,
     LabKnobGroup.DETAIL,
     LabKnobGroup.OPTICS,
-    LabKnobGroup.GEOMETRY,
 )
 
 /**

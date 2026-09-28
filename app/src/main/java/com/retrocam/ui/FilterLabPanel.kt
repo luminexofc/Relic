@@ -106,10 +106,6 @@ fun FilterLabPanel(
     onClearCurves: () -> Unit,
     onEffect: (Int, Float) -> Unit,
     onDuoColour: (Boolean, Int) -> Unit,
-    luts: List<LutStore.Entry>,
-    onPickLut: (String?) -> Unit,
-    onImportLut: () -> Unit,
-    onLutAmount: (Float) -> Unit,
     palette: List<Int>,
     watermarks: List<Pair<String, String>>,
     onPickWatermark: (String?) -> Unit,
@@ -136,7 +132,6 @@ fun FilterLabPanel(
     onImportXmp: () -> Unit,
     onDismissReport: () -> Unit,
     onCopyReport: (String) -> Unit,
-    onDeleteLut: (String) -> Unit,
     onDeleteWatermark: (String) -> Unit,
     selectedRecipeId: String?,
     onUse: (String) -> Unit,
@@ -294,67 +289,6 @@ fun FilterLabPanel(
             }
             if (recipe.duotone > 0f) {
                 DuotoneColours(recipe, accent, dim, onDuoColour)
-            }
-            Spacer(Modifier.height(4.dp))
-            Text("3D LUT", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-            if (recipe.lutId != null) {
-                LabSlider(
-                    "LUT AMOUNT", recipe.lutAmount, 0f, 1f, accent, dim,
-                    onLutAmount,
-                    neutral = 1f,
-                    onReset = { onLutAmount(1f) },
-                )
-            }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                item(key = "lut_none") {
-                    TemplateChip(
-                        label = "NONE",
-                        selected = recipe.lutId == null,
-                        accent = accent,
-                        dim = dim,
-                        onClick = { onPickLut(null) },
-                    )
-                }
-                items(luts, key = { it.id }) { e ->
-                    // Imported LUTs are deletable; the generated ones are not, so
-                    // they get no long-press handler at all.
-                    val onLong = if (e.builtin == null) {
-                        { onDeleteLut(e.id) }
-                    } else {
-                        null
-                    }
-                    TemplateChip(
-                        label = e.displayName,
-                        selected = recipe.lutId == e.id,
-                        accent = accent,
-                        dim = dim,
-                        onClick = { onPickLut(e.id) },
-                        onLongClick = onLong,
-                    )
-                }
-                item { ImportChip("+ IMPORT LUT", dim, onImportLut) }
-            }
-            Spacer(Modifier.height(10.dp))
-                        Spacer(Modifier.height(8.dp))
-            Text("WATERMARK", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                item {
-                    TemplateChip("NONE", recipe.watermarkId == null, accent, dim) { onPickWatermark(null) }
-                }
-                items(watermarks, key = { it.first }) { (id, label) ->
-                    TemplateChip(
-                        label = label,
-                        selected = recipe.watermarkId == id,
-                        accent = accent,
-                        dim = dim,
-                        onClick = { onPickWatermark(id) },
-                        onLongClick = { onDeleteWatermark(id) },
-                    )
-                }
-                item { ImportChip("+ IMPORT", dim, onImportWatermark) }
-            }
-            if (recipe.watermarkId != null) {
-                LabSlider("MARK OPACITY", recipe.watermarkAlpha, 0f, 1f, accent, dim, onWatermarkAlpha)
             }
             Spacer(Modifier.height(10.dp))
             Text("PALETTE FROM FRAME", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)

@@ -20,7 +20,6 @@ import com.retrocam.catalog.lab.LabPrimitives
 import com.retrocam.catalog.lab.LabStage
 import com.retrocam.catalog.Shaders
 import com.retrocam.catalog.lab.LabUniforms
-import com.retrocam.catalog.lab.LutCatalog
 import com.retrocam.catalog.lab.LabRecipe
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -127,10 +126,7 @@ class FilterRenderer(
         val uSplitAmount: Int,
         val uShadowTint: Int,
         val uHighlightTint: Int,
-        val uLut: Int,
-        val uLutAmount: Int,
-        val uLutCube: Int,
-        val uLutGrid: Int,
+
         val uStampTex: Int,
         val uStampRect: Int,
         val uStampAlpha: Int,
@@ -414,13 +410,6 @@ class FilterRenderer(
         thumbSize = 0
         oesTextureId = -1
         glyphTexId = 0
-        // Fresh GL context: every cached GL id, LUT textures included, belonged
-        // to a dead context. The app re-queues them.
-        if (labLuts.isNotEmpty()) {
-            GLES20.glDeleteTextures(labLuts.size, labLuts.values.toIntArray(), 0)
-            labLuts.clear()
-            lutCubes.clear()
-        }
 
         val textures = IntArray(1)
         GLES20.glGenTextures(1, textures, 0)
@@ -475,11 +464,6 @@ class FilterRenderer(
     }
 
     /**
-     * Filter Lab LUT textures, keyed by recipe-visible id. Owned here rather than
-     * in the UI because they are GL objects and must be re-created after a
-     * context loss, same as every other handle in this class.
-     */
-    /**
      * The tone curve texture handle, 0 when the recipe has none. One texture,
      * not a map: there is only ever one curve set, and it is replaced rather
      * than accumulated.
@@ -496,44 +480,6 @@ class FilterRenderer(
      * path for the sake of skipping a memcpy.
      */
     private var curveTexBytes: ByteArray? = null
-    private val labLuts = LinkedHashMap<String, Int>()
-    private val lutCubes = HashMap<String, Int>()
-
-    /**
-     * Uploads (or replaces) a LUT. [pixels] is a row-major Hald image, [side] its
-     * width and height, [cube] the cube edge (16 or 64).
-     *
-     * Must be called on the GL thread; the UI hands the work over via
-     * [queueLutUpload].
-     */
-    fun uploadLut(id: String, pixels: IntArray, side: Int, cube: Int) {
-        labLuts[id]?.let { GLES20.glDeleteTextures(1, intArrayOf(it), 0) }
-        val tex = IntArray(1)
-        GLES20.glGenTextures(1, tex, 0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
-        val buf = java.nio.ByteBuffer
-            .allocateDirect(side * side * 4)
-            .order(java.nio.ByteOrder.nativeOrder())
-        for (p in pixels) {
-            buf.put(((p shr 16) and 0xFF).toByte())
-            buf.put(((p shr 8) and 0xFF).toByte())
-            buf.put((p and 0xFF).toByte())
-            buf.put(0xFF.toByte())
-        }
-        buf.position(0)
-        GLES20.glTexImage2D(
-            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, side, side, 0,
-            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf,
-        )
-        // NEAREST matches upstream, which indexes the CLUT with integer
-        // arithmetic and no interpolation.
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        labLuts[id] = tex[0]
-        lutCubes[id] = cube
-    }
 
     /**
      * Uploads or replaces the 256x1 tone curve texture. Must run on the GL
@@ -565,8 +511,6 @@ class FilterRenderer(
         curveTexBytes = rgba
     }
 
-    fun hasLut(id: String): Boolean = labLuts.containsKey(id)
-
     /**
      * Overlay textures (date stamp, watermark logos), keyed by [stampKey] or by
      * the logo's content hash. Same GL lifetime rules as everything else here.
@@ -582,18 +526,12 @@ class FilterRenderer(
     }
 
     private sealed interface LabOp {
-        data class Upload(val id: String, val pixels: IntArray, val side: Int, val cube: Int) : LabOp
         data class Overlay(
             val id: String, val pixels: IntArray, val w: Int, val h: Int, val aspect: Float,
         ) : LabOp
     }
 
     private val labQueue = java.util.concurrent.ConcurrentLinkedQueue<LabOp>()
-
-    /** Queues a LUT upload onto the GL thread. Safe to call from the main thread. */
-    fun queueLutUpload(id: String, pixels: IntArray, side: Int, cube: Int) {
-        labQueue.add(LabOp.Upload(id, pixels, side, cube))
-    }
 
     /**
      * Queues an overlay upload. [aspect] must be the rasterised bitmap's real
@@ -636,7 +574,6 @@ class FilterRenderer(
     private fun drainLabOps() {
         while (true) {
             when (val op = labQueue.poll() ?: return) {
-                is LabOp.Upload -> uploadLut(op.id, op.pixels, op.side, op.cube)
                 is LabOp.Overlay -> uploadOverlay(op.id, op.pixels, op.w, op.h, op.aspect)
             }
         }
@@ -680,11 +617,6 @@ class FilterRenderer(
         if (glyphTexId != 0) {
             GLES20.glDeleteTextures(1, intArrayOf(glyphTexId), 0)
             glyphTexId = 0
-        }
-        if (labLuts.isNotEmpty()) {
-            GLES20.glDeleteTextures(labLuts.size, labLuts.values.toIntArray(), 0)
-            labLuts.clear()
-            lutCubes.clear()
         }
         clearOverlays()
     }
@@ -799,10 +731,7 @@ class FilterRenderer(
                 uSplitAmount = GLES20.glGetUniformLocation(p, "u_splitAmount"),
                 uShadowTint = GLES20.glGetUniformLocation(p, "u_shadowTint"),
                 uHighlightTint = GLES20.glGetUniformLocation(p, "u_highlightTint"),
-                uLut = GLES20.glGetUniformLocation(p, "u_lut"),
-                uLutAmount = GLES20.glGetUniformLocation(p, "u_lutAmount"),
-                uLutCube = GLES20.glGetUniformLocation(p, "u_lutCube"),
-                uLutGrid = GLES20.glGetUniformLocation(p, "u_lutGrid"),
+
                 uStampTex = GLES20.glGetUniformLocation(p, "u_stampTex"),
                 uStampRect = GLES20.glGetUniformLocation(p, "u_stampRect"),
                 uStampAlpha = GLES20.glGetUniformLocation(p, "u_stampAlpha"),
@@ -1141,11 +1070,11 @@ class FilterRenderer(
             GLES20.glUniform4f(prog.uRanges, r[0], r[1], r[2], r[3])
             val l = u.local
             GLES20.glUniform3f(prog.uLocal, l[0], l[1], l[2])
-            // u_hsl is eight vec4s; the base location plus a count writes them
+            // u_hsl is eight vec3s; the base location plus a count writes them
             // all. Skipped entirely when the mixer is off, which is the point of
             // carrying u_hslActive separately.
             if (u.hslActive > 0f) {
-                GLES20.glUniform4fv(prog.uHsl, Hsl.BANDS, u.hsl, 0)
+                GLES20.glUniform3fv(prog.uHsl, Hsl.BANDS, u.hsl, 0)
                 GLES20.glUniform1f(prog.uHslActive, u.hslActive)
             } else {
                 GLES20.glUniform1f(prog.uHslActive, 0f)
@@ -1211,21 +1140,6 @@ class FilterRenderer(
             GLES20.glUniform1f(prog.uSplitAmount, u.splitAmount)
             GLES20.glUniform3f(prog.uShadowTint, u.shadowTint[0], u.shadowTint[1], u.shadowTint[2])
             GLES20.glUniform3f(prog.uHighlightTint, u.highlightTint[0], u.highlightTint[1], u.highlightTint[2])
-            // A recipe naming a LUT we do not hold (someone else's recipe, or an
-            // import we have not downloaded) still grades: amount stays 0 and the
-            // rest of the recipe works.
-            val lutId = lab.lutId
-            val lutTex = if (lutId != null) labLuts[lutId] else null
-            if (lutTex != null && prog.uLut != -1) {
-                GLES20.glUniform1f(prog.uLutAmount, if (lab.lutActive) u.lutAmount else 0f)
-                GLES20.glUniform1f(prog.uLutCube, lutCubes[lutId]?.toFloat() ?: 64f)
-                GLES20.glUniform1f(prog.uLutGrid, LutCatalog.gridFor(lutCubes[lutId] ?: 64).toFloat())
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE4)
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, lutTex)
-                GLES20.glUniform1i(prog.uLut, 4)
-            } else if (prog.uLutAmount != -1) {
-                GLES20.glUniform1f(prog.uLutAmount, 0f)
-            }
             // Overlays. The stamp is keyed by its text+colour because that is
             // what the CPU rasterises; the watermark by its content hash.
             val stampTex = stampKey(lab)?.let { overlayTexs[it] }

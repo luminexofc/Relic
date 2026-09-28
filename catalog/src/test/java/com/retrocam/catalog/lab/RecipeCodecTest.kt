@@ -33,14 +33,13 @@ class RecipeCodecTest {
      * effects, two colours, then the lut pair.
      */
     private fun payload(
-        version: String = "12",
+        version: String = "13",
         name: String = "X",
         base: String = "original",
         template: String = "-",
         knobs: List<String> = listOf("0", "1", "1", "0", "0"),
         effects: List<String> = List(6) { "0" },
         colours: List<String> = listOf("0", "255"),
-        lut: List<String> = listOf("-", "0"),
         colour: List<String> = listOf("1", "0", "0", "0"),
         stamp: List<String> = listOf("-", "0", "4", "1", "-", "0", "4"),
         reserved: String = "0",
@@ -52,7 +51,7 @@ class RecipeCodecTest {
         mixer: List<String> = listOf("-", "0"),
         calibration: String = "-",
         extra: List<String> = listOf("0", "-", "-", "0.5", "0.5", "0", "0", "-", "0", "0", "0", "0", "0.5", "-"),
-    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours + lut +
+    ) = (listOf(version, b64(name), base, template) + knobs + effects + colours +
         colour + stamp + reserved + stages + curves + ranges + local + ops + mixer + calibration + extra)
         .joinToString(",")
 
@@ -80,7 +79,7 @@ class RecipeCodecTest {
         // length, which is what catches a payload() helper that fell behind.
         assertEquals(built, payload().split(',').size, "payload() is out of step with encode()")
         // If these ever disagree the app is unreadable, so pin the number too.
-        assertEquals(64, built, "field count changed; bump FIELD_COUNT and this test")
+        assertEquals(62, built, "field count changed; bump FIELD_COUNT and this test")
     }
 
     /**
@@ -106,7 +105,6 @@ class RecipeCodecTest {
             vignette = 0.3f, grain = 0.4f, sharpen = 0.5f, blur = 0.1f,
             glitch = 0.2f, duotone = 0.3f,
             duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
-            lutId = "builtin_faded", lutAmount = 0.7f,
             gamma = 1.25f, splitAmount = 0.4f,
             shadowTint = 0xFF203040.toInt(), highlightTint = 0xFF403020.toInt(),
             stampText = "'98", stampColor = 0xFFFF8C14.toInt(),
@@ -154,7 +152,6 @@ class RecipeCodecTest {
         assertEquals(full.stampColor, got.stampColor, "stamp colour")
         assertEquals(full.stampPosition, got.stampPosition, "stamp position")
         assertEquals(full.watermarkId, got.watermarkId, "watermark id")
-        assertEquals(full.lutId, got.lutId, "lut id")
         assertEquals(full.templateId, got.templateId, "template")
     }
 
@@ -215,7 +212,6 @@ class RecipeCodecTest {
             vignette = 0.3f, grain = 0.4f, sharpen = 0.5f, blur = 0.1f,
             glitch = 0.2f, duotone = 0.3f,
             duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
-            lutId = "builtin_faded", lutAmount = 0.7f,
             gamma = 1.25f, splitAmount = 0.4f,
             shadowTint = 0xFF203040.toInt(), highlightTint = 0xFF403020.toInt(),
             stampText = "'98", stampColor = 0xFFFF8C14.toInt(),
@@ -389,28 +385,6 @@ class RecipeCodecTest {
     fun `overlay amounts are clamped on decode`() {
         val wild = payload(stamp = listOf("-", "0", "0", "99", "-", "0", "0"))
         assertEquals(1f, assertNotNull(RecipeCodec.decode(wild)).lab.stampAlpha)
-    }
-
-    @Test
-    fun `a lut reference survives a round trip and a missing lut does not break it`() {
-        val r = SavedRecipe.create("FILMED", "original", LabRecipe(lutId = "builtin_faded", lutAmount = 0.8f))
-        val back = assertNotNull(RecipeCodec.decode(RecipeCodec.encode(r)))
-        assertEquals("builtin_faded", back.lab.lutId)
-        assertEquals(0.8f, back.lab.lutAmount, 1e-4f)
-        assertTrue(back.lab.lutActive)
-    }
-
-    @Test
-    fun `recipes differing only by their lut get different ids`() {
-        val a = SavedRecipe.create("L", "original", LabRecipe(lutId = "builtin_faded", lutAmount = 0.5f))
-        val b = SavedRecipe.create("L", "original", LabRecipe(lutId = "builtin_cross", lutAmount = 0.5f))
-        assertTrue(a.id != b.id, "lut must be part of the content hash")
-    }
-
-    @Test
-    fun `lut amount is clamped on decode`() {
-        val wild = payload(lut = listOf("lut_abc", "99"))
-        assertEquals(1f, assertNotNull(RecipeCodec.decode(wild)).lab.lutAmount)
     }
 
     @Test

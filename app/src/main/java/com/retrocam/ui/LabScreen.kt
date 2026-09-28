@@ -114,9 +114,6 @@ fun LabScreen(viewModel: CameraViewModel) {
 
     // Every picker the Lab needs, created here rather than on the camera screen:
     // these belong to the Lab, and the camera screen has no use for them now.
-    val lutPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) viewModel.importLut(uri, renderer)
-    }
     val markPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) viewModel.importWatermark(uri)
     }
@@ -132,7 +129,7 @@ fun LabScreen(viewModel: CameraViewModel) {
     }
 
     // The Lab's own renderer, not the camera's. syncRenderer is what tells the
-    // ViewModel which GL pipeline is live, so LUT and overlay uploads land on the
+    // ViewModel which GL pipeline is live, so overlay uploads land on the
     // right one.
     LaunchedEffect(renderer) { viewModel.syncRenderer(renderer) }
     // The Lab's shaders need the same theme flag the camera's do.
@@ -310,18 +307,6 @@ fun LabScreen(viewModel: CameraViewModel) {
             onClearCurves = viewModel::clearLabCurves,
             onEffect = viewModel::setLabEffect,
             onDuoColour = viewModel::setLabDuotoneColour,
-            luts = remember(state.labLutTick) { viewModel.labLuts() },
-            onPickLut = { id ->
-                viewModel.setLabLut(id)
-                // Null means "no LUT"; there is nothing to upload for it.
-                if (id != null) viewModel.uploadLut(id, renderer)
-            },
-            // No mime filter: a .cube is text, so providers hand it back as
-            // text/xml, application/octet-stream or nothing at all, and
-            // filtering would hide the file rather than fail usefully. LutStore
-            // sniffs the bytes instead.
-            onImportLut = { lutPicker.launch("*/*") },
-            onLutAmount = viewModel::setLabLutAmount,
             palette = palette,
             watermarks = watermarks,
             onPickWatermark = viewModel::setLabWatermark,
@@ -355,7 +340,6 @@ fun LabScreen(viewModel: CameraViewModel) {
                 cm?.setPrimaryClip(android.content.ClipData.newPlainText("RetroCam XMP report", text))
                 Feedback.info(context, "Report copied")
             },
-            onDeleteLut = viewModel::deleteLut,
             onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,
             onDeleteSelected = viewModel::clearLabSelection,

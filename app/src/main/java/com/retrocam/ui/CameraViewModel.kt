@@ -89,8 +89,6 @@ data class CameraUiState(
     val labIntensity: Float = 1f,
     /** Saved recipes, newest last. Recipes whose base filter is gone are dropped. */
     val labRecipes: List<com.retrocam.catalog.lab.SavedRecipe> = emptyList(),
-    /** Bumped when the set of available LUTs changes, to re-read the list. */
-    val labLutTick: Int = 0,
     /**
      * What the last `.xmp` import did, kept so the Lab can show it. An XMP
      * preset carries around forty settings and the Lab has seven knobs, so an
@@ -142,8 +140,6 @@ class CameraViewModel @Inject constructor(
      * Created lazily: it touches filesDir, and the property has to be declared
      * before the [init] block that used to assign it.
      */
-    private val lutStore: LutStore by lazy { LutStore(context) }
-
     /** The CPU half of the overlay path; see [OverlayRaster] for why it exists. */
     private val overlayRaster: OverlayRaster by lazy { OverlayRaster(context) }
 
@@ -321,29 +317,6 @@ class CameraViewModel @Inject constructor(
                 _uiState.update { it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
             }
         }
-    }
-
-    /**
-     * Deletes an imported LUT and drops it from the draft if it was selected.
-     *
-     * Clearing the reference matters: the shader already degrades gracefully when
-     * a named LUT is missing, but leaving a dangling id in the draft means the
-     * recipe re-encodes a reference to something the user just threw away.
-     */
-    fun deleteLut(id: String) {
-        if (com.retrocam.catalog.lab.LutCatalog.builtInById.containsKey(id)) {
-            Feedback.info(context, "Built-in LUTs can't be deleted")
-            return
-        }
-        if (!lutStore.delete(id)) {
-            Feedback.error(context)
-            return
-        }
-        _uiState.update {
-            if (it.labRecipe.lutId == id) it.copy(labRecipe = it.labRecipe.copy(lutId = null, lutAmount = 0f)) else it
-        }
-        _uiState.update { it.copy(labLutTick = it.labLutTick + 1) }
-        Feedback.info(context, "LUT deleted")
     }
 
     fun deleteWatermark(id: String) {
@@ -708,67 +681,6 @@ class CameraViewModel @Inject constructor(
         _uiState.update { it.copy(labRecipe = it.labRecipe.withEffect(which, value)) }
     }
 
-    // ---- Filter Lab LUTs ----
-
-    /**
-     * Every LUT the Lab can offer: the generated built-ins plus anything the user
-     * has imported. Re-read whenever the Lab opens, since importing happens
-     * outside this ViewModel's flow.
-     */
-    fun labLuts(): List<com.retrocam.ui.LutStore.Entry> {
-        return lutStore.all()
-    }
-
-    /**
-     * Selects a LUT, or clears it.
-     *
-     * Selecting the LUT that is already selected also clears it. Both that and an
-     * explicit NONE exist because one way of turning something off is a way of
-     * getting stuck with it on.
-     */
-    fun setLabLut(id: String?) {
-        pendingSelectedRecipe = null
-        if (id != null && id == _uiState.value.labRecipe.lutId) {
-            _uiState.update {
-                it.copy(labRecipe = it.labRecipe.copy(lutId = null, lutAmount = 0f))
-            }
-            return
-        }
-        _uiState.update {
-            it.copy(
-                labRecipe = it.labRecipe.copy(
-                    lutId = id,
-                    // Selecting a LUT turns it on at full strength, which is what
-                    // picking a colour normally means.
-                    lutAmount = if (id == null) 0f else 1f,
-                ),
-            )
-        }
-    }
-
-    fun setLabLutAmount(value: Float) {
-        _uiState.update { it.copy(labRecipe = it.labRecipe.copy(lutAmount = value.coerceIn(0f, 1f))) }
-    }
-
-    /**
-     * Imports a Hald PNG, then makes sure the renderer has its pixels.
-     *
-     * The renderer owns the GL texture, so a LUT selected later in the session
-     * still has to be uploaded; [syncRenderer] re-uploads whatever the current
-     * recipe needs, and this covers the rest by uploading on selection.
-     */
-    fun importLut(uri: android.net.Uri, renderer: FilterRenderer?) {
-        val r = lutStore.import(uri)
-        val entry = r.getOrNull()
-        if (entry == null) {
-            Feedback.error(context)
-            return
-        }
-        uploadLut(entry.id, renderer)
-        _uiState.update { it.copy(labLutTick = it.labLutTick + 1) }
-        setLabLut(entry.id)
-    }
-
     /**
      * Imports a Camera Raw `.xmp` preset onto the current recipe.
      *
@@ -796,17 +708,36 @@ class CameraViewModel @Inject constructor(
             return
         }
         pendingSelectedRecipe = null
+        // Stashed so dismissing the report reverts the draft: without this the
+        // imported grade lingered in the draft after testing, and raising
+        // intensity from 0 with nothing selected faded the test preset back in.
+        preXmpDraft = _uiState.value.labRecipe
         _uiState.update { s ->
+            val draft = s.labRecipe
+            val r = result.recipe
             s.copy(
-                labRecipe = s.labRecipe.copy(
-                    adjustments = s.labRecipe.adjustments.copy(
-                        contrast = result.recipe.adjustments.contrast,
-                        saturation = result.recipe.adjustments.saturation,
-                        warmth = result.recipe.adjustments.warmth,
-                        tint = result.recipe.adjustments.tint,
-                    ),
-                    gamma = result.recipe.gamma,
-                    sharpen = result.recipe.sharpen,
+                labRecipe = draft.copy(
+                    adjustments = r.adjustments,
+                    gamma = r.gamma,
+                    highlights = r.highlights, shadows = r.shadows,
+                    whites = r.whites, blacks = r.blacks,
+                    texture = r.texture, clarity = r.clarity, dehaze = r.dehaze,
+                    sharpRadius = r.sharpRadius, detail = r.detail, masking = r.masking,
+                    grain = r.grain, grainSize = r.grainSize, grainRough = r.grainRough,
+                    vignette = r.vignette,
+                    vigMidpoint = r.vigMidpoint, vigFeather = r.vigFeather,
+                    vigRound = r.vigRound, vigAspect = r.vigAspect,
+                    hsl = r.hsl, grayscale = r.grayscale, bwMix = r.bwMix,
+                    calibration = r.calibration, vibrance = r.vibrance,
+                    colorGrade = r.colorGrade,
+                    denoiseLum = r.denoiseLum, denoiseColor = r.denoiseColor,
+                    defringe = r.defringe,
+                    lensCA = r.lensCA, lensEnable = r.lensEnable,
+                    lensDistort = r.lensDistort,
+                    toneCurves = r.toneCurves,
+                    splitAmount = r.splitAmount,
+                    shadowTint = r.shadowTint, highlightTint = r.highlightTint,
+                    geometry = r.geometry,
                 ),
                 xmpReport = result,
             )
@@ -814,14 +745,21 @@ class CameraViewModel @Inject constructor(
         Feedback.info(context, "XMP imported")
     }
 
-    fun clearXmpReport() {
-        _uiState.update { it.copy(xmpReport = null) }
-    }
+    private var preXmpDraft: com.retrocam.catalog.lab.LabRecipe? = null
 
-    /** Reads a LUT's pixels and hands them to the GL thread. */
-    fun uploadLut(id: String, renderer: FilterRenderer?) {
-        val px = lutStore.pixelsFor(id) ?: return
-        renderer?.queueLutUpload(id, px.pixels, px.side, px.cube)
+    /**
+     * Dismisses the report AND reverts the draft to what it was before the
+     * import. Applying-then-dismissing must not leave test values behind:
+     * with no saved recipe selected, intensity from 0 has to fade in nothing,
+     * not the preset that was just tried.
+     */
+    fun clearXmpReport() {
+        val back = preXmpDraft
+        preXmpDraft = null
+        _uiState.update {
+            if (back != null) it.copy(labRecipe = back, xmpReport = null)
+            else it.copy(xmpReport = null)
+        }
     }
 
     /** Split-tone anchor colours. [shadow] picks which of the two tints. */
@@ -1228,11 +1166,6 @@ class CameraViewModel @Inject constructor(
     /** Pushes mirror + buffer size into the GL pipeline. Call on bind + flip. */
     fun syncRenderer(renderer: FilterRenderer) {
         glRenderer = renderer
-        // A fresh GL context has no LUT textures, so re-upload whatever the
-        // current recipe names. Without this, returning from the background after
-        // a context loss would silently drop the LUT from every recipe.
-        val lutId = _uiState.value.labRecipe.lutId ?: _uiState.value.filter.lab?.lutId
-        if (lutId != null) uploadLut(lutId, renderer)
         syncOverlays()
         refreshOverlays()
         // Selfie mirror only when the user wants it; back camera never mirrors.

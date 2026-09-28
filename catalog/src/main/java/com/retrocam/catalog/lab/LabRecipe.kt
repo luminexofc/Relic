@@ -32,17 +32,7 @@ data class LabRecipe(
     val duotoneShadow: Int = DEFAULT_DUO_SHADOW,
     /** Packed ARGB for the duotone highlight colour. */
     val duotoneHighlight: Int = DEFAULT_DUO_HIGHLIGHT,
-    /**
-     * Id of the LUT to apply, or null. A built-in id from [LutCatalog], or the
-     * content hash of an imported Hald PNG.
-     *
-     * Deliberately an id and never the image: a recipe has to fit in a QR code,
-     * and a LUT does not. The receiving app looks the id up and, if it has never
-     * seen that LUT, the grade still works with the LUT simply skipped.
-     */
-    val lutId: String? = null,
-    /** Blend toward the LUT, 0..1. */
-    val lutAmount: Float = 0f,
+
     // ---- colour correction that a 4x5 matrix cannot express ----
     /**
      * Midtone power curve. 1 is neutral, below 1 lifts the midtones, above crushes
@@ -265,7 +255,6 @@ data class LabRecipe(
         if (blur > 0f) add("blur")
         if (glitch > 0f) add("glitch")
         if (duotone > 0f) add("duotone")
-        if (lutId != null && lutAmount > 0f) add("lut")
         if (gamma != 1f) add("gamma")
         if (splitAmount > 0f) add("split tone")
         if (!stampText.isNullOrBlank()) add("date stamp")
@@ -297,9 +286,6 @@ data class LabRecipe(
             add(LabPrimitives.byId(st.primitiveId)?.displayName?.lowercase() ?: st.primitiveId)
         }
     }
-
-    /** True when a LUT is selected and switched on. */
-    val lutActive: Boolean get() = lutId != null && lutAmount > 0f
 
     companion object {
         /**
@@ -340,8 +326,6 @@ data class LabRecipe(
             duotone = r.duotone.coerceIn(0f, 1f),
             duotoneShadow = r.duotoneShadow,
             duotoneHighlight = r.duotoneHighlight,
-            lutId = r.lutId,
-            lutAmount = r.lutAmount.coerceIn(0f, 1f),
             gamma = r.gamma.coerceIn(0.2f, 3f),
             splitAmount = r.splitAmount.coerceIn(0f, 1f),
             shadowTint = r.shadowTint,

@@ -27,7 +27,6 @@ class RecipeQrTest {
             vignette = 0.35f, grain = 0.22f, sharpen = 0.1f,
             blur = 0.05f, glitch = 0.08f, duotone = 0.5f,
             duotoneShadow = 0xFF102040.toInt(), duotoneHighlight = 0xFFFFC040.toInt(),
-            lutId = "builtin_faded", lutAmount = 0.7f,
             stampText = "'98 08 13", stampColor = 0xFFFF8C14.toInt(),
             stampPosition = StampPosition.CENTER, stampAlpha = 0.8f,
             watermarkId = "mark_abc123", watermarkAlpha = 0.6f,

@@ -23,8 +23,7 @@ data class LabUniforms(
     /** Duotone highlight colour, 0..1 rgb. */
     val duotoneHighlight: FloatArray,
     val duotone: Float,
-    /** LUT blend, 0..1. Zero also means "no LUT bound". */
-    val lutAmount: Float,
+
     /** `[x0,y0,x1,y1]` in frame UV, or [NO_RECT] for no stamp. */
     val stampRect: FloatArray,
     val stampAlpha: Float,
@@ -147,7 +146,7 @@ data class LabUniforms(
                 duotoneShadow = unpackRgb(recipe.duotoneShadow),
                 duotoneHighlight = unpackRgb(recipe.duotoneHighlight),
                 duotone = recipe.duotone.coerceIn(0f, 1f),
-                lutAmount = if (recipe.lutActive) recipe.lutAmount.coerceIn(0f, 1f) else 0f,
+
                 stampRect = if (recipe.stampText.isNullOrBlank()) {
                     NO_RECT
                 } else {

@@ -1,5 +1,13 @@
 # Build Report — RetroCam
 
+> **Note on §4 and §6.** This was written at the end of one session. The XMP
+> reader has since been fixed and extended: a real Lightroom preset that reported
+> **9% covered** (7 exact, 2 approximate, 88 not supported) now reports
+> **88-92%**, and `bash tools/verify.sh` runs 260 unit tests. The bugs in §4 are
+> kept as written because the reader bugs that followed were the same shape:
+> invisible on a device, and only visible when something checks the number.
+> See `~/.opencode/plan/xmp-full-fidelity.md`.
+
 A record of everything built, decided, broken and fixed while taking RetroCam
 from "41 GPU filters" to a Filter Lab with chained stages, area masks and
 near-complete Adobe XMP preset compatibility.

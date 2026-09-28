@@ -40,8 +40,6 @@ data class SavedRecipe(
                 lab.templateId?.lowercase()?.replace('_', ' '),
                 lab.adjustments.describe().takeIf { it != "no grading" },
                 lab.activeEffects().takeIf { it.isNotEmpty() }?.joinToString(" "),
-                lab.lutId?.removePrefix("lut_")?.take(6),
-                lab.lutId?.removePrefix("lut_")?.take(6),
                 "over ${base.displayName}",
             ).joinToString(", "),
             lab = lab,
@@ -86,8 +84,6 @@ data class SavedRecipe(
                 append(RecipeCodec.q(lab.duotone)).append(',')
                 append(lab.duotoneShadow).append(',')
                 append(lab.duotoneHighlight).append('|')
-                append(lab.lutId ?: "-").append(',')
-                append(RecipeCodec.q(lab.lutAmount)).append(',')
                 append(RecipeCodec.q(lab.gamma)).append(',')
                 append(RecipeCodec.q(lab.splitAmount)).append(',')
                 append(lab.shadowTint).append(',')
@@ -171,8 +167,8 @@ data class SavedRecipe(
  */
 object RecipeCodec {
 
-    /** Bumped when the field list changes. v11 HSL+grayscale+calibration, v12 full LR panels. */
-    const val VERSION = 12
+    /** Bumped when the field list changes. v13 drops the LUT pair entirely. */
+    const val VERSION = 13
 
     private const val SEP = ","
 
@@ -186,7 +182,7 @@ object RecipeCodec {
      * RecipeCodecTest now asserts this against a real encode, so the two cannot
      * drift again without a red test rather than a blank app.
      */
-    private const val FIELD_COUNT = 64
+    private const val FIELD_COUNT = 62
 
     private val b64 get() = Base64.getUrlEncoder().withoutPadding()
     private val unb64 get() = Base64.getUrlDecoder()
@@ -202,7 +198,6 @@ object RecipeCodec {
             q(a.brightness), q(a.contrast), q(a.saturation), q(a.warmth), q(a.tint),
             q(lab.vignette), q(lab.grain), q(lab.sharpen), q(lab.blur), q(lab.glitch), q(lab.duotone),
             r.lab.duotoneShadow.toString(), r.lab.duotoneHighlight.toString(),
-            r.lab.lutId ?: "-", q(lab.lutAmount),
             q(lab.gamma), q(lab.splitAmount),
             lab.shadowTint.toString(), lab.highlightTint.toString(),
             r.lab.stampText?.let { b64.encodeToString(it.toByteArray()) } ?: "-",
@@ -338,61 +333,59 @@ object RecipeCodec {
                     duotone = parts[14].toFloat(),
                     duotoneShadow = parts[15].toInt(),
                     duotoneHighlight = parts[16].toInt(),
-                    lutId = parts[17].takeIf { it != "-" },
-                    lutAmount = parts[18].toFloat(),
                     // Free text again, so it gets the same base64 treatment as the
                     // recipe name rather than being trusted to avoid separators.
-                    gamma = parts[19].toFloat(),
-                    splitAmount = parts[20].toFloat(),
-                    shadowTint = parts[21].toInt(),
-                    highlightTint = parts[22].toInt(),
-                    stampText = parts[23].takeIf { it != "-" }?.let { String(unb64.decode(it)) },
-                    stampColor = parts[24].toInt(),
-                    stampPosition = StampPosition.entries.getOrElse(parts[25].toInt()) {
+                    gamma = parts[17].toFloat(),
+                    splitAmount = parts[18].toFloat(),
+                    shadowTint = parts[19].toInt(),
+                    highlightTint = parts[20].toInt(),
+                    stampText = parts[21].takeIf { it != "-" }?.let { String(unb64.decode(it)) },
+                    stampColor = parts[22].toInt(),
+                    stampPosition = StampPosition.entries.getOrElse(parts[23].toInt()) {
                         StampPosition.BOTTOM_RIGHT
                     },
-                    stampAlpha = parts[26].toFloat(),
-                    watermarkId = parts[27].takeIf { it != "-" },
-                    watermarkAlpha = parts[28].toFloat(),
-                    watermarkPosition = StampPosition.entries.getOrElse(parts[29].toInt()) {
+                    stampAlpha = parts[24].toFloat(),
+                    watermarkId = parts[25].takeIf { it != "-" },
+                    watermarkAlpha = parts[26].toFloat(),
+                    watermarkPosition = StampPosition.entries.getOrElse(parts[27].toInt()) {
                         StampPosition.BOTTOM_RIGHT
                     },
                     // Unused today, reserved so a future field can be appended
                     // without reinterpreting every existing payload.
-                    _reserved = parts[30],
-                    stages = decodeStages(parts[31]),
-                    toneCurves = parts[32].takeIf { it != ToneCurve.NONE } ?: ToneCurve.NONE,
-                    highlights = parts[33].toFloat(),
-                    shadows = parts[34].toFloat(),
-                    whites = parts[35].toFloat(),
-                    blacks = parts[36].toFloat(),
-                    texture = parts[37].toFloat(),
-                    clarity = parts[38].toFloat(),
-                    dehaze = parts[39].toFloat(),
-                    sharpRadius = parts[40].toFloat(),
-                    detail = parts[41].toFloat(),
-                    masking = parts[42].toFloat(),
-                    grainSize = parts[43].toFloat(),
-                    grainRough = parts[44].toFloat(),
-                    vigMidpoint = parts[45].toFloat(),
-                    vigFeather = parts[46].toFloat(),
-                    hsl = parts[47].takeIf { it != Hsl.NONE } ?: Hsl.NONE,
-                    grayscale = parts[48].toFloat(),
-                    calibration = parts[49].takeIf { it != Calibration.NONE } ?: Calibration.NONE,
-                    vibrance = parts[50].toFloat(),
-                    colorGrade = parts[51].takeIf { it != ColorGrade.NONE } ?: ColorGrade.NONE,
-                    bwMix = parts[52].takeIf { it != BwMix.NONE } ?: BwMix.NONE,
-                    vigRound = parts[53].toFloat(),
-                    vigAspect = parts[54].toFloat(),
-                    denoiseLum = parts[55].toFloat(),
-                    denoiseColor = parts[56].toFloat(),
-                    defringe = parts[57].takeIf { it != Defringe.NONE } ?: Defringe.NONE,
-                    lensCA = parts[58].toFloat(),
-                    lensEnable = parts[59].toFloat(),
-                    lensDistort = parts[60].toFloat(),
-                    lensBlur = parts[61].toFloat(),
-                    lensFocus = parts[62].toFloat(),
-                    geometry = parts[63].takeIf { it != Geometry.NONE } ?: Geometry.NONE,
+                    _reserved = parts[28],
+                    stages = decodeStages(parts[29]),
+                    toneCurves = parts[30].takeIf { it != ToneCurve.NONE } ?: ToneCurve.NONE,
+                    highlights = parts[31].toFloat(),
+                    shadows = parts[32].toFloat(),
+                    whites = parts[33].toFloat(),
+                    blacks = parts[34].toFloat(),
+                    texture = parts[35].toFloat(),
+                    clarity = parts[36].toFloat(),
+                    dehaze = parts[37].toFloat(),
+                    sharpRadius = parts[38].toFloat(),
+                    detail = parts[39].toFloat(),
+                    masking = parts[40].toFloat(),
+                    grainSize = parts[41].toFloat(),
+                    grainRough = parts[42].toFloat(),
+                    vigMidpoint = parts[43].toFloat(),
+                    vigFeather = parts[44].toFloat(),
+                    hsl = parts[45].takeIf { it != Hsl.NONE } ?: Hsl.NONE,
+                    grayscale = parts[46].toFloat(),
+                    calibration = parts[47].takeIf { it != Calibration.NONE } ?: Calibration.NONE,
+                    vibrance = parts[48].toFloat(),
+                    colorGrade = parts[49].takeIf { it != ColorGrade.NONE } ?: ColorGrade.NONE,
+                    bwMix = parts[50].takeIf { it != BwMix.NONE } ?: BwMix.NONE,
+                    vigRound = parts[51].toFloat(),
+                    vigAspect = parts[52].toFloat(),
+                    denoiseLum = parts[53].toFloat(),
+                    denoiseColor = parts[54].toFloat(),
+                    defringe = parts[55].takeIf { it != Defringe.NONE } ?: Defringe.NONE,
+                    lensCA = parts[56].toFloat(),
+                    lensEnable = parts[57].toFloat(),
+                    lensDistort = parts[58].toFloat(),
+                    lensBlur = parts[59].toFloat(),
+                    lensFocus = parts[60].toFloat(),
+                    geometry = parts[61].takeIf { it != Geometry.NONE } ?: Geometry.NONE,
                 ),
             )
             SavedRecipe(

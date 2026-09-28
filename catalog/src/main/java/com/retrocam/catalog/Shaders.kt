@@ -169,7 +169,12 @@ object Shaders {
         // unless a band is off neutral, so the step costs nothing for a recipe
         // that does not use it. Mirrored by Hsl in Kotlin, which is the
         // testable copy and which HslShaderTest checks against this file.
-        uniform vec4 u_hsl[8];
+        //
+        // vec3, not vec4: the recipe holds exactly 24 values and the upload is
+        // one glUniform3fv of count 8. A vec4 here would read 32 floats out of
+        // a 24-float array on every frame the mixer is on, which crashed the
+        // app as soon as any mixer slider moved.
+        uniform vec3 u_hsl[8];
         uniform float u_hslActive;
 
         // One HSL hue channel, t in turns, 0..1 wrapping. Declared before
@@ -246,13 +251,13 @@ object Shaders {
          * ORIGINAL hue, so a rotation cannot walk a pixel into the next band's
          * adjustment as it moves.
          */
-        vec3 hslBands(vec3 c, vec4 b[8]) {
+        vec3 hslBands(vec3 c, vec3 b[8]) {
             vec3 hsl = rgbToHsl(c);
             vec3 adj = vec3(0.0);
             float total = 0.0;
             for (int i = 0; i < 8; i++) {
                 float w = hslWeight(hsl.x, i);
-                adj += b[i].xyz * w;
+                adj += b[i] * w;
                 total += w;
             }
             if (total > 0.0) adj /= total;
@@ -322,12 +327,6 @@ object Shaders {
         uniform float u_splitAmount;
         uniform vec3 u_shadowTint;
         uniform vec3 u_highlightTint;
-
-        // Filter Lab 3D LUT (a Hald CLUT). u_lutAmount 0 leaves it unbound.
-        uniform sampler2D u_lut;
-        uniform float u_lutAmount;
-        uniform float u_lutCube;   // 16 or 64
-        uniform float u_lutGrid;   // sqrt(cube): 4 or 8
 
         // Filter Lab overlays: the 1990s date stamp and a watermark logo. Each is
         // a pre-rasterised bitmap; the rect comes from OverlayPlacement.rect().
@@ -1391,9 +1390,7 @@ object Shaders {
             c = clamp(c, 0.0, 1.0);
 
             // --- 10. Color Mixer, eight hue bands. After the curve, because
-            // the curve decides what colour each band actually contains, and
-            // before the LUT, because a LUT is a look transform applied on top
-            // of a grade rather than part of it.
+            // the curve decides what colour each band actually contains.
             //
             // No texture fetches: the band weights are arithmetic. u_hslActive
             // is 0 unless a band is off neutral, so a recipe that does not use
@@ -1402,7 +1399,7 @@ object Shaders {
                 c = clamp(hslBands(c, u_hsl), 0.0, 1.0);
             }
 
-            // --- 10b. Color Grading 3-way. After mixer, before LUT. Three tints
+            // --- 10b. Color Grading 3-way. After mixer. Three tints
             // from HSL->RGB, weighted by luminance zones with blend smoothing.
             if (u_gradeActive > 0.0) {
                 float l = luminance(c);
@@ -1420,24 +1417,6 @@ object Shaders {
                 vec3 tint = shTint * wSh + midTint * wMid + hiTint * wHi;
                 tint = tint / max(wSh + wMid + wHi, 0.001);
                 c = mix(c, c * (tint * 2.0), clamp(wSh * u_gradeA.y + wMid * u_gradeA.w + wHi * u_gradeB.y, 0.0, 1.0));
-            }
-
-            // --- 3D LUT (Hald CLUT) ---
-            // Upstream's index maths, transcribed. Must stay in step with
-            // LutCatalog.haldTexel, which the unit tests pin.
-            //   blueIndex = b*(cube-1)/255 ; tile = (blueIndex%grid, blueIndex/grid)
-            //   x = tileX*cube + r*(cube-1)/255, y = tileY*cube + g*(cube-1)/255
-            if (u_lutAmount > 0.0) {
-                float maxC = u_lutCube - 1.0;
-                float bi = floor(c.b * maxC + 0.5);
-                float tx = mod(bi, u_lutGrid);
-                float ty = floor(bi / u_lutGrid);
-                vec2 px = vec2(
-                    tx * u_lutCube + floor(c.r * maxC + 0.5),
-                    ty * u_lutCube + floor(c.g * maxC + 0.5)
-                ) + 0.5;
-                vec3 mapped = texture2D(u_lut, px / (u_lutGrid * u_lutCube)).rgb;
-                c = mix(c, mapped, u_lutAmount);
             }
 
             // --- split tone: pull a tint into the shadows and another into the
