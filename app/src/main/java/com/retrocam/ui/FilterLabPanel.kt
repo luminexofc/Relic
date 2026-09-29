@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Details
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -903,7 +903,10 @@ private enum class LabGroup(val title: String, val icon: androidx.compose.ui.gra
     LIGHT("Light", Icons.Filled.WbSunny),
     COLOR("Color", Icons.Filled.Palette),
     EFFECTS("Effects", Icons.Filled.AutoAwesome),
-    DETAIL("Detail", Icons.Filled.Tune),
+    // Details, not Tune: Tune is three hairlines and reads as "settings", and at
+    // that weight it looked half the size of the filled Palette and Camera
+    // beside it. Details also says what the group actually is.
+    DETAIL("Detail", Icons.Filled.Details),
     OPTICS("Optics", Icons.Filled.Camera),
 }
 
@@ -1159,8 +1162,13 @@ private fun ChoiceChip(
 ) {
     Row(
         Modifier
-            .border(1.dp, if (selected) accent else dim.copy(alpha = 0.35f), RoundedCornerShape(50))
+            // clip BEFORE background. Modifier.background(Color) fills the whole
+            // rectangular bounds and does not respect a shape, so without this
+            // the selected tint was a square-cornered block sitting outside the
+            // pill's rounded border - which is exactly what it looked like.
+            .clip(RoundedCornerShape(50))
             .background(if (selected) accent.copy(alpha = 0.14f) else androidx.compose.ui.graphics.Color.Transparent)
+            .border(1.dp, if (selected) accent else dim.copy(alpha = 0.35f), RoundedCornerShape(50))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

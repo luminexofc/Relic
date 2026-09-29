@@ -923,8 +923,19 @@ object Shaders {
     const val CRT = """
         vec4 applyFilter(vec4 src, vec2 uv) {
             vec2 d = uv - 0.5;
-            float r2 = dot(d, d);
-            vec3 c = sampleSrc(clamp(uv + d * r2 * 0.25, 0.0, 1.0)).rgb;
+            // Aspect-correct the radius before using it. In raw UV space a
+            // portrait preview has a much smaller uv.x span than uv.y, so an
+            // uncorrected r2 is dominated by y: the "curvature" then stretches
+            // the picture vertically instead of rounding it, which is what made
+            // this look stretched rather than curved on a phone held upright.
+            float aspect = u_resolution.x / max(u_resolution.y, 1.0);
+            vec2 da = vec2(d.x * aspect, d.y);
+            float r2 = dot(da, da);
+            // Sample INWARD. Sampling outward and clamping smears the edge row
+            // into a band along the top and bottom, which is the other half of
+            // the stretching. Pulling inward keeps every lookup inside the
+            // frame, so the bulge is a real magnification instead of a smear.
+            vec3 c = sampleSrc(clamp(uv - d * r2 * 0.16, 0.0, 1.0)).rgb;
             float scan = 0.82 + 0.18 * sin(uv.y * u_resolution.y * 3.14159);
             float gx = fract(uv.x * u_resolution.x / 3.0);
             vec3 grille = vec3(

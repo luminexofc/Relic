@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -66,6 +67,10 @@ fun GalleryScreen(saveDir: String, onBack: () -> Unit) {
         Row(
             Modifier
                 .fillMaxWidth()
+                // Every other screen clears the system bars. This one did not,
+                // so "ALBUM" and the back arrow were drawn straight through the
+                // clock and the signal icons.
+                .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
