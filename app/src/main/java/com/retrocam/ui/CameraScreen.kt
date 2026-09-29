@@ -627,10 +627,19 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             }
         }
 
-        FilterHandleBar(
-            filterName = state.filter.displayName,
-            onOpen = { showFilters = true },
-        )
+        // Pinned to the bottom of the preview pane. It used to land across the
+        // top of the viewfinder, over the thing the user is trying to frame -
+        // BoxWithConstraints is not a BoxScope, so it has no align() and nothing
+        // was anchoring this deliberately. This is the only change kept from the
+        // reverted commit; the control column is left exactly as it was.
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+            Box(Modifier.padding(bottom = 6.dp)) {
+                FilterHandleBar(
+                    filterName = state.filter.displayName,
+                    onOpen = { showFilters = true },
+                )
+            }
+        }
     }
 
     @Composable
