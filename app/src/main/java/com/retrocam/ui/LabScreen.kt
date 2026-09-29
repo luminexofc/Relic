@@ -184,8 +184,25 @@ fun LabScreen(viewModel: CameraViewModel) {
         onDispose { renderer.release() }
     }
 
+    // Bind the camera to the Lab's own SurfaceTexture as soon as that texture
+    // exists.
+    //
+    // This was missing, and the preview was sampling a texture that had never
+    // received a frame: the camera screen's dispose calls detachPreview() and
+    // nothing ever re-bound the camera here, because the ON_RESUME branch below
+    // only fires on a real resume, and switching between Camera and Lab is a
+    // composable branch inside one activity rather than a new one. What the
+    // shader sampled was uninitialised buffer memory, which is the blocky mess
+    // the viewfinder was showing and which no amount of aspect-ratio work could
+    // have fixed. CameraScreen has always done this; the Lab did not.
+    LaunchedEffect(texture) {
+        texture?.let { viewModel.attachPreview(lifecycleOwner, it) }
+    }
+
     // Bind the camera to the Lab's surface while it is alive, and let go on the
-    // way out so the camera screen can take it back.
+    // way out so the camera screen can take it back. ON_RESUME still matters for
+    // coming back from the background, where CameraX was torn down with the
+    // process but the texture survived.
     DisposableEffect(lifecycleOwner, texture) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -459,10 +476,17 @@ fun LabScreen(viewModel: CameraViewModel) {
             }
         } else {
             Column(Modifier.fillMaxSize()) {
+                // The preview takes the lion's share of the height so the
+                // aspect-fitted box is as wide as it can be. At a fixed 230dp it
+                // could only ever be 172dp wide on a 393dp screen - 48% of the
+                // usable width - which read as the viewfinder having shrunk
+                // rather than as it being correctly proportioned. At 1.5 against
+                // the panel's 1 the box comes out 333dp wide, 92% of the
+                // available width, and the panel still has 296dp to scroll in.
                 previewPane(
                     Modifier
                         .fillMaxWidth()
-                        .height(230.dp)
+                        .weight(1.5f)
                         .padding(horizontal = 16.dp),
                 )
                 Spacer(Modifier.height(8.dp))
