@@ -137,6 +137,8 @@ fun FilterLabPanel(
     onDeleteWatermark: (String) -> Unit,
     selectedRecipeId: String?,
     onUse: (String) -> Unit,
+    onUseDraft: () -> Unit,
+    onRequestSave: () -> Unit,
     onDeleteSelected: () -> Unit,
     onIntensity: (Float) -> Unit,
     onEdit: (String) -> Unit,
@@ -199,6 +201,24 @@ fun FilterLabPanel(
             TemplateCarousel(recipe.templateId, accent, dim, onTemplate)
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
+            // Basic is pick-and-shoot: the premade goes straight to the camera,
+            // with no save and no strip entry in between. Saving is for looks
+            // you built yourself; a premade you have not kept is not yours yet.
+            Spacer(Modifier.height(10.dp))
+            ShadcnButton(
+                text = "Use in camera",
+                onClick = onUseDraft,
+                modifier = Modifier.fillMaxWidth(),
+                size = ButtonSize.Lg,
+                leading = {
+                    Icon(
+                        Icons.Filled.Send,
+                        contentDescription = null,
+                        tint = ShadcnColor.PrimaryForeground,
+                        modifier = Modifier.size(15.dp),
+                    )
+                },
+            )
         } else if (tab == 3) {
             // Where a preset is brought in and where it is kept. Both were
             // scattered before: the import chip sat in Basic, the list sat below
@@ -307,6 +327,17 @@ fun FilterLabPanel(
                 }
             }
             Spacer(Modifier.height(8.dp))
+            // Advanced saves as a shareable .xmp file, named first. The header
+            // save icon does the same thing from this tab; this button exists
+            // because a screen with no save on it reads as a screen that
+            // cannot save - which is the report that started this.
+            ShadcnButton(
+                text = "Save as .XMP",
+                onClick = onRequestSave,
+                modifier = Modifier.fillMaxWidth(),
+                size = ButtonSize.Lg,
+            )
+            Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 ShadcnButton(
                     text = "Reset all",
@@ -1430,6 +1461,16 @@ private fun XmpReportBlock(
             .clickable { open = !open }
             .padding(10.dp),
     ) {
+        // The file already had a name, so the report says it. An import that
+        // lands nameless reads as "nothing happened" even when every slider
+        // moved.
+        result.name?.takeIf { it.isNotBlank() }?.let { presetName ->
+            Text(
+                presetName.uppercase(),
+                fontFamily = AppType.Sans, fontSize = 11.sp, color = accent,
+            )
+            Spacer(Modifier.height(2.dp))
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${result.coveragePercent}% COVERED",

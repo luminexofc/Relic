@@ -659,6 +659,16 @@ class CameraViewModel @Inject constructor(
     private fun enterLab() {
         val s = _uiState.value
         refreshOverlays()
+        // A draft handed to the camera was never saved, so coming back must
+        // keep the Lab exactly as it was. Seeding from the transient filter
+        // would overwrite labBaseId with "lab_draft" - an id no catalog knows
+        // - and the next save dialog would offer LAB_DRAFT as a name.
+        if (s.filter.id == "lab_draft" && !s.labRecipe.isIdentity) {
+            _uiState.update {
+                it.copy(mode = MODE_LAB, labTab = 0, labIntensity = s.intensity)
+            }
+            return
+        }
         val editing = s.labRecipes.firstOrNull { it.id == s.filter.id }
         _uiState.update {
             if (editing != null) {
@@ -785,10 +795,15 @@ class CameraViewModel @Inject constructor(
         // imported grade lingered in the draft after testing, and raising
         // intensity from 0 with nothing selected faded the test preset back in.
         preXmpDraft = _uiState.value.labRecipe
+        // The file already has a name, so the draft takes it. Without this the
+        // import landed nameless and the save dialog asked for a name the file
+        // had already given.
+        val importedName = result.name?.takeIf { it.isNotBlank() }
         _uiState.update { s ->
             val draft = s.labRecipe
             val r = result.recipe
             s.copy(
+                labName = importedName ?: s.labName,
                 labRecipe = draft.copy(
                     adjustments = r.adjustments,
                     gamma = r.gamma,
@@ -1146,6 +1161,81 @@ class CameraViewModel @Inject constructor(
             }
         }
         Feedback.info(context, "${r.name} applied")
+    }
+
+    /**
+     * Uses the current draft directly in the main camera, without saving it.
+     *
+     * This is the Basic-tab path: pick a premade template, hit Use in camera,
+     * and shoot with it. Nothing is written to DataStore, so nothing appears
+     * in the filter strip - the strip only ever shows saved presets, and a
+     * premade you have not kept is not yours yet. The draft stays in the Lab,
+     * so going back lets you keep adjusting or save it properly.
+     */
+    fun useDraftInCamera() {
+        val s = _uiState.value
+        if (s.labRecipe.isIdentity) {
+            Feedback.info(context, "Pick a preset first")
+            return
+        }
+        val base = com.retrocam.catalog.FilterCatalog.byId[s.labBaseId]
+            ?: com.retrocam.catalog.FilterCatalog.default
+        val templateName = s.labRecipe.templateId
+            ?.let { com.retrocam.catalog.lab.LabTemplates.byId[it]?.displayName }
+        val title = s.labName.ifBlank { templateName ?: base.displayName }.uppercase()
+        // A transient id, never persisted. The strip is built from stored
+        // recipes, so this look is usable but not listed - exactly what Basic
+        // wants. Reusing one stable id keeps the camera from accumulating a
+        // new filter entry per tap.
+        val spec = base.copy(
+            id = "lab_draft",
+            displayName = title,
+            family = com.retrocam.catalog.FilterFamily.LAB,
+            context = "lab draft, over ${base.displayName}",
+            lab = s.labRecipe,
+        )
+        _uiState.update { it.copy(filter = spec, mode = MODE_PHOTO) }
+        viewModelScope.launch {
+            settings.setIntensity(spec.id, s.labIntensity)
+            _uiState.update {
+                it.copy(intensity = s.labIntensity, sizeScale = 1f, detailScale = 1f)
+            }
+        }
+        Feedback.info(context, "$title applied")
+    }
+
+    /**
+     * Writes the current draft out as a shareable `.xmp` file.
+     *
+     * This is the Advanced-tab save: every slider value goes into a Lightroom
+     * preset, named by the user first. Nothing is written to the internal
+     * preset list - a shareable file and a stored preset are different things,
+     * and conflating them is why saves seemed to vanish.
+     */
+    fun exportDraftXmp(name: String, uri: android.net.Uri) {
+        val clean = name.trim().uppercase().take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)
+        if (clean.isBlank()) {
+            notice("Give it a name first")
+            Feedback.error(context)
+            return
+        }
+        if (_uiState.value.labRecipe.isIdentity) {
+            Feedback.info(context, "Nothing to save yet")
+            return
+        }
+        val doc = com.retrocam.catalog.lab.XmpExport.export(_uiState.value.labRecipe, clean)
+        val ok = runCatching {
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(doc.toByteArray())
+            } ?: throw IllegalStateException("no stream")
+        }.isSuccess
+        if (ok) {
+            _uiState.update { it.copy(labName = clean) }
+            Feedback.info(context, "Saved $clean.xmp")
+        } else {
+            notice("Couldn't write the file - try a different folder")
+            Feedback.error(context)
+        }
     }
 
     fun deleteLabRecipe(id: String) {

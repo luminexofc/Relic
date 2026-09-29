@@ -116,9 +116,12 @@ fun LabScreen(viewModel: CameraViewModel) {
     var texture by remember { mutableStateOf<SurfaceTexture?>(null) }
     val renderer = remember { FilterRenderer(onTextureReady = { texture = it }) }
     var glView by remember { mutableStateOf<GLSurfaceView?>(null) }
-    // A blank recipe has nothing worth saving, so the icon stays dimmed until
-    // something has actually been changed.
-    val canSave = viewModel.canSaveLab()
+    // Read off state, not off a ViewModel call. canSaveLab() reads the same
+    // backing flow, but as a plain call it is not a State observation, so the
+    // header kept the value from first composition and the icon stayed dimmed
+    // after the first slider drag - the "save button feels completely dead"
+    // report. Deriving from `state` recomposes on every draft change.
+    val canSave = !state.labRecipe.isIdentity
     // Declared up here because both the renderer flag and the rebind below
     // key off it, and a local val has to precede its use.
     val displayOrientation = LocalConfiguration.current.orientation
@@ -170,6 +173,15 @@ fun LabScreen(viewModel: CameraViewModel) {
             val id = xmpExportId
             xmpExportId = null
             if (id != null && uri != null) viewModel.exportXmp(id, uri)
+        }
+    // Advanced-tab save: the draft itself as an .xmp file, named first.
+    // CreateDocument only returns the uri, so the name waits here meanwhile.
+    var draftExportName by remember { mutableStateOf<String?>(null) }
+    val draftExportPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri ->
+            val name = draftExportName
+            draftExportName = null
+            if (name != null && uri != null) viewModel.exportDraftXmp(name, uri)
         }
 
     // The Lab's own renderer, not the camera's. syncRenderer is what tells the
@@ -393,6 +405,8 @@ fun LabScreen(viewModel: CameraViewModel) {
             },
             onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,
+            onUseDraft = viewModel::useDraftInCamera,
+            onRequestSave = { showSaveDialog = true },
             onDeleteSelected = viewModel::clearLabSelection,
             onIntensity = viewModel::setLabIntensity,
             onEdit = viewModel::editLabRecipe,
@@ -440,11 +454,20 @@ fun LabScreen(viewModel: CameraViewModel) {
             // where it was a row you had to scroll back to find. The name is only
             // asked for once you actually tap it, so a slider you keep nudging
             // never puts a text field in the way.
+            //
+            // Always clickable, never silently dead. A disabled icon swallows
+            // the tap with no feedback, which is exactly the "save button feels
+            // completely dead" report when the enabled flag lags the draft. The
+            // dimmed tint still says "nothing to save", but the tap itself
+            // answers with why.
             ShadcnButton(
-                onClick = { showSaveDialog = true },
+                onClick = {
+                    if (!canSave) Feedback.info(context, "Nothing to save yet")
+                    else showSaveDialog = true
+                },
                 variant = ButtonVariant.Ghost,
                 size = ButtonSize.Icon,
-                enabled = canSave,
+                enabled = true,
                 leading = {
                     Icon(
                         Icons.Filled.Save,
@@ -517,13 +540,25 @@ fun LabScreen(viewModel: CameraViewModel) {
 
         // The name is only ever asked for at the moment of saving, so the panel
         // has no text field in it at all while you are adjusting sliders.
+        //
+        // What "save" means depends on the tab. Advanced is the XMP path:
+        // every slider value leaves as a shareable Lightroom preset file, so
+        // the name goes into the file picker, not the internal list. Every
+        // other tab keeps the internal save.
         if (showSaveDialog) {
             SaveNameDialog(
                 initial = state.labName.ifBlank { state.labBaseId.uppercase() },
+                title = if (state.labTab == 1) "NAME THIS XMP" else "NAME THIS LOOK",
                 onDismiss = { showSaveDialog = false },
                 onConfirm = { name ->
                     viewModel.setLabName(name)
-                    viewModel.saveLab()
+                    if (state.labTab == 1) {
+                        draftExportName = name.trim().uppercase()
+                            .take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)
+                        draftExportPicker.launch("${draftExportName}.xmp")
+                    } else {
+                        viewModel.saveLab()
+                    }
                     showSaveDialog = false
                 },
             )
@@ -543,10 +578,11 @@ fun LabScreen(viewModel: CameraViewModel) {
 @Composable
 private fun SaveNameDialog(
     initial: String,
+    title: String = "NAME THIS LOOK",
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial) }
+    var name by remember(initial) { mutableStateOf(initial) }
     BackHandler(onBack = onDismiss)
     Box(
         Modifier
@@ -576,7 +612,7 @@ private fun SaveNameDialog(
                 .padding(20.dp),
         ) {
             Text(
-                "NAME THIS LOOK",
+                title,
                 fontFamily = AppType.Sans,
                 fontWeight = AppType.Strong,
                 fontSize = 13.sp,
