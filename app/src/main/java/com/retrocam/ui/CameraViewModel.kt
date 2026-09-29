@@ -747,6 +747,14 @@ class CameraViewModel @Inject constructor(
                 xmpReport = result,
             )
         }
+        // Keep it. An import that only lived in the draft meant the preset never
+        // appeared in the Presets list at all, so it had to be re-typed and
+        // saved by hand before it existed anywhere - which is the opposite of
+        // what importing a preset is for. Kept under the name the file carries,
+        // falling back to the base filter's name when the file has none.
+        val keepAs = result.name?.takeIf { it.isNotBlank() }
+            ?: _uiState.value.labBaseId.uppercase()
+        keepRecipe(keepAs, _uiState.value.labRecipe)
         Feedback.info(context, "XMP imported")
     }
 
@@ -961,30 +969,58 @@ class CameraViewModel @Inject constructor(
     fun canSaveLab(): Boolean = !_uiState.value.labRecipe.isIdentity
 
     /**
-     * Persists the draft. Deliberately does NOT select it or leave the Lab: the
-     * two are separate screens now, so saving is just saving, and handing the
-     * recipe to the camera is the explicit [useRecipeInCamera] step.
+     * The base filter a recipe saved now has to sit on.
+     *
+     * A saved Lab recipe is not itself a catalog filter, so entering the Lab
+     * while one of those was active left [UiState.labBaseId] pointing at a recipe
+     * id that FilterCatalog has never heard of. `toSpec()` then returned null and
+     * the save did nothing at all, silently. Falling back to the default filter
+     * keeps the save working; the caller tells the user it happened.
      */
-    fun saveLab() {
-        val s = _uiState.value
-        if (s.labRecipe.isIdentity) return
-        // Remember which recipe this draft is, so "use in camera" knows what to
-        // hand over without re-deriving it from the name.
-        pendingSelectedRecipe = null
+    private fun baseFilterToSaveOn(labBaseId: String): String =
+        if (com.retrocam.catalog.FilterCatalog.byId.containsKey(labBaseId)) labBaseId
+        else com.retrocam.catalog.FilterCatalog.default.id
+
+    /**
+     * Persists [lab] under [name], replacing any recipe with the same content
+     * hash, and selects it. Shared by the save button and the XMP import so both
+     * land in the preset list the same way.
+     */
+    private fun keepRecipe(name: String, lab: com.retrocam.catalog.lab.LabRecipe) {
         val saved = com.retrocam.catalog.lab.SavedRecipe.create(
-            name = s.labName.ifBlank { s.labBaseId.uppercase() },
-            baseId = s.labBaseId,
-            lab = s.labRecipe,
+            name = name.take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME),
+            baseId = baseFilterToSaveOn(_uiState.value.labBaseId),
+            lab = lab,
         )
-        if (saved.toSpec() == null) return
+        if (saved.toSpec() == null) {
+            Feedback.error(context)
+            return
+        }
         viewModelScope.launch {
             val merged = (settings.customRecipes.first()
                 .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
                 .filter { it.id != saved.id }) + saved
             settings.setCustomRecipes(merged.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
-            settings.setIntensity(saved.id, s.labIntensity)
-            _uiState.update { it.copy(savedRecipeId = saved.id) }
+            settings.setIntensity(saved.id, _uiState.value.labIntensity)
+            _uiState.update { it.copy(savedRecipeId = saved.id, labName = saved.name) }
         }
+    }
+
+    /**
+     * Persists the draft. Deliberately does NOT leave the Lab: the two are
+     * separate screens now, so saving is just saving, and handing the recipe to
+     * the camera is the explicit [useRecipeInCamera] step.
+     */
+    fun saveLab() {
+        val s = _uiState.value
+        if (s.labRecipe.isIdentity) {
+            Feedback.info(context, "Nothing to save yet")
+            return
+        }
+        // Remember which recipe this draft is, so "use in camera" knows what to
+        // hand over without re-deriving it from the name.
+        pendingSelectedRecipe = null
+        keepRecipe(s.labName.ifBlank { s.labBaseId.uppercase() }, s.labRecipe)
     }
 
     /** Forgets the current selection, hiding the bridge button. */

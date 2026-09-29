@@ -50,7 +50,19 @@ data class XmpKey(
     val approx: Boolean get() = fidelity == Fidelity.APPROXIMATE
 }
 
-data class XmpResult(val recipe: LabRecipe, val keys: List<XmpKey>) {
+data class XmpResult(
+    val recipe: LabRecipe,
+    val keys: List<XmpKey>,
+    /**
+     * `crs:Name`, when the file carries one.
+     *
+     * A preset is named in the file, and throwing that away meant every import
+     * arrived nameless and had to be typed a second time before it could be kept.
+     * Null rather than a blank string, so a file with no name is distinguishable
+     * from one named with whitespace.
+     */
+    val name: String? = null,
+) {
     /**
      * Keys that were mapped onto something.
      *
@@ -941,6 +953,7 @@ object XmpImport {
                 vignette = vignette,
             ),
             keys = keys,
+            name = a["Name"]?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 }
