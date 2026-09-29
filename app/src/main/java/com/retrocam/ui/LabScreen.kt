@@ -228,8 +228,14 @@ fun LabScreen(viewModel: CameraViewModel) {
     val previewAspect = previewAspect(state.viewAspect)
     @Composable
     fun previewPane(mod: Modifier) {
-        Box(mod, contentAlignment = Alignment.Center) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+        Box(mod) {
+            // The centring has to be HERE, on the constraints box, not on the
+            // outer one. The outer Box's only child is this fillMaxSize() box,
+            // so contentAlignment up there centred something that already filled
+            // the space and did nothing, while the fitted box inside defaulted
+            // to TopStart - which is why the portrait preview sat hard against
+            // the left edge with a wide empty band to its right.
+            BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 val w = minOf(maxWidth, maxHeight * previewAspect)
                 val h = w / previewAspect
                 Box(
