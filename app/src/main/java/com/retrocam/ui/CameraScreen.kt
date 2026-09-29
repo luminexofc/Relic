@@ -38,8 +38,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -53,7 +51,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -630,18 +627,10 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             }
         }
 
-        // Anchored to the bottom of the pane rather than left wherever the
-        // content alignment drops it. It used to land across the top of the
-        // preview, over the thing you are trying to frame. BoxWithConstraints
-        // is not a BoxScope, so the anchoring Box wraps the whole pane instead.
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
-            Box(Modifier.padding(bottom = 6.dp)) {
-                FilterHandleBar(
-                    filterName = state.filter.displayName,
-                    onOpen = { showFilters = true },
-                )
-            }
-        }
+        FilterHandleBar(
+            filterName = state.filter.displayName,
+            onOpen = { showFilters = true },
+        )
     }
 
     @Composable
@@ -745,28 +734,14 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     previewPane(Modifier.fillMaxSize())
                 }
-                // The control stack is centred vertically and scrolls when the
-                // window is too short to hold it. It used to be pinned top and
-                // bottom with a weight spacer, which spread the shutter away
-                // from the rest of the controls and clipped the lot on a short
-                // window. A weight spacer cannot be used at all here: inside a
-                // verticalScroll the height is unbounded, so the inner column is
-                // given a minimum instead and centres within that.
                 Column(
                     Modifier
                         .width(CAMERA_PANE_W)
-                        .fillMaxHeight()
-                        .verticalScroll(rememberScrollState()),
+                        .fillMaxHeight(),
                 ) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = LocalConfiguration.current.screenHeightDp.dp),
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        topControls()
-                        bottomControls()
-                    }
+                    topControls()
+                    Spacer(Modifier.weight(1f))
+                    bottomControls()
                 }
             }
         } else {
