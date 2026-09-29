@@ -349,6 +349,11 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
         if (state.mode == CameraViewModel.MODE_LAB) renderer.release()
         onDispose { }
     }
+    // The renderer takes back the quarter turn a landscape viewfinder picks up
+    // from a still-portrait surface transform.
+    LaunchedEffect(displayOrientation) {
+        renderer.landscapePreview = displayOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    }
     LaunchedEffect(state.paperTheme) {
         renderer.theme = if (state.paperTheme) 1f else 0f
     }

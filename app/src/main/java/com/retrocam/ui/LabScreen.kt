@@ -119,6 +119,9 @@ fun LabScreen(viewModel: CameraViewModel) {
     // A blank recipe has nothing worth saving, so the icon stays dimmed until
     // something has actually been changed.
     val canSave = viewModel.canSaveLab()
+    // Declared up here because both the renderer flag and the rebind below
+    // key off it, and a local val has to precede its use.
+    val displayOrientation = LocalConfiguration.current.orientation
     /**
      * Which stage the viewfinder drag and the area controls act on.
      *
@@ -174,6 +177,12 @@ fun LabScreen(viewModel: CameraViewModel) {
     // right one.
     LaunchedEffect(renderer) { viewModel.syncRenderer(renderer) }
     // The Lab's shaders need the same theme flag the camera's do.
+    // The renderer takes back the quarter turn a landscape viewfinder picks up
+    // from a still-portrait surface transform. It needs to know the orientation
+    // for that, and it is the same answer the layout is already asking for.
+    LaunchedEffect(displayOrientation) {
+        renderer.landscapePreview = displayOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    }
     LaunchedEffect(state.paperTheme) {
         renderer.theme = if (state.paperTheme) 1f else 0f
     }
@@ -207,7 +216,6 @@ fun LabScreen(viewModel: CameraViewModel) {
     // doing while the surrounding UI stayed upright. Re-binding on orientation
     // change is one unbindAll plus one bind, once per rotation, and it does not
     // depend on CameraX having noticed the change for this particular surface.
-    val displayOrientation = LocalConfiguration.current.orientation
     LaunchedEffect(texture, displayOrientation) {
         texture?.let { viewModel.attachPreview(lifecycleOwner, it) }
     }

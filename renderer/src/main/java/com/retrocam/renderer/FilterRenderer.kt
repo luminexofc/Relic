@@ -244,6 +244,18 @@ class FilterRenderer(
     /** View aspect (w/h). Updated from layout; 0 = follow camera. */
     @Volatile var viewAspect = 0f
 
+    /**
+     * True while the viewfinder is drawing into a landscape destination.
+     *
+     * Set by the UI from the window orientation, and used only to decide
+     * whether a 90° correction is needed - see the `derotate90` local in the
+     * draw path. It is deliberately not a rotation to apply on its own: the
+     * correction is applied only when the incoming transform actually transposes
+     * the frame, so a surface request that CameraX *did* refresh for the new
+     * orientation is left alone instead of being turned the other way.
+     */
+    @Volatile var landscapePreview = false
+
     /** Last preview surface size — used as capture resolution (WYSIWYG 1:1). */
     @Volatile var lastWidth = 0
         private set
@@ -937,6 +949,11 @@ class FilterRenderer(
      *  the front buffer itself. Composing R180 exactly undoes an exact-180°
      *  error under every hypothesis (pure 180° or vertical flip: R180 o FlipV
      *  = FlipH, the correct selfie mirror), while preserving mirror/cover.
+     * @param derotate90 composes a frame-space -90° (counter-clockwise) turn
+     *  FIRST, to take back the quarter turn a landscape viewfinder gets when
+     *  the bound transform is still the portrait one. Applied before the 180
+     *  because it is multiplied last, and both are frame-space so they compose
+     *  in the order they are listed here.
      */
     private fun buildCombinedMatrix(
         m: FloatArray,
@@ -946,19 +963,25 @@ class FilterRenderer(
         cy: Float,
         doMirror: Boolean,
         derotate180: Boolean,
+        derotate90: Boolean,
     ) {
         val t1 = affine2D(1f, 0f, 0f, 1f, -cx, -cy)
         val s = affine2D(sx, 0f, 0f, sy, 0f, 0f)
         val t2 = affine2D(1f, 0f, 0f, 1f, cx, cy)
         val mx = if (doMirror) affine2D(-1f, 0f, 0f, 1f, 2f * cx, 0f) else IDENTITY_MATRIX
-        // Innermost first: T1*M, then S, T2, Mx, and the frame-space R180 last
-        // (rightmost = applied first to frame coordinates).
+        // Innermost first: T1*M, then S, T2, Mx, and the frame-space rotations
+        // last (rightmost = applied first to frame coordinates).
         var acc = multiplyMM(t1, m)
         acc = multiplyMM(s, acc)
         acc = multiplyMM(t2, acc)
         acc = multiplyMM(mx, acc)
         if (derotate180) {
             acc = multiplyMM(acc, affine2D(-1f, 0f, 0f, -1f, 1f, 1f))
+        }
+        if (derotate90) {
+            // (x,y) -> (y, 1-x): a quarter turn back, pivoting on the centre,
+            // which is also why the cover centre below is unaffected by it.
+            acc = multiplyMM(acc, affine2D(0f, 1f, -1f, 0f, 0f, 1f))
         }
         acc.copyInto(combinedMatrix)
     }
@@ -989,14 +1012,28 @@ class FilterRenderer(
         // The destination is the real target (GL surface, encoder surface or
         // capture bitmap), NOT the viewfinder element: reusing the viewfinder
         // aspect here is what stretched the image when the frame was resized.
-        val srcA = if (inputIsOES) displayedAspect(transformMatrix) else srcAspect(width, height)
+        val srcA0 = if (inputIsOES) displayedAspect(transformMatrix) else srcAspect(width, height)
         val dstA = if (width > 0 && height > 0) width.toFloat() / height else viewAspect
+        // Remove the 90 degrees the frame arrives turned by, if it is turned.
+        //
+        // In landscape the destination is wide while the bound transform can
+        // still be the portrait one, and the viewfinder then shows the scene on
+        // its side with the surrounding UI upright. Correcting it here rather
+        // than trusting the surface request to have been re-issued is
+        // deliberate. Guarded on `isTransposed`, so a transform CameraX *did*
+        // refresh for the new orientation - which is not transposing - is left
+        // alone instead of being turned the other way.
+        val derotate90 = inputIsOES && landscapePreview && isTransposed(transformMatrix)
+        // A quarter turn swaps the axes, so the source's displayed aspect
+        // becomes its reciprocal and the crop fractions move to the other axes.
+        val srcA = if (derotate90) 1f / srcA0 else srcA0
         if (srcA > 0f && dstA > 0f) {
             val fx = minOf(1f, dstA / srcA) // crop fraction along display x
-            val fy = minOf(1f, srcA / dstA) // crop fraction along display y
+            val fy = minOf(srcA / dstA, 1f) // crop fraction along display y
             // The cover scale multiplies the transform's OUTPUT axes, which are
-            // the swapped ones when the buffer is transposed.
-            val swap = inputIsOES && isTransposed(transformMatrix)
+            // the swapped ones when the buffer is transposed - and the quarter
+            // turn above swaps them once more.
+            val swap = inputIsOES && isTransposed(transformMatrix) != derotate90
             coverScale[0] = if (swap) fy else fx
             coverScale[1] = if (swap) fx else fy
         } else {
@@ -1025,6 +1062,7 @@ class FilterRenderer(
             cy,
             doMirror = applyMirror && mirror,
             derotate180 = inputIsOES && mirror,
+            derotate90 = derotate90,
         )
         GLES20.glUniformMatrix4fv(prog.uTexTransform, 1, false, combinedMatrix, 0)
         GLES20.glUniform1f(prog.uTheme, theme)
