@@ -755,7 +755,16 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             }
         } else {
             topControls()
-            previewPane(Modifier.fillMaxWidth().weight(1f))
+            // Same plain-Box wrapper as the landscape branch, and for the same
+            // reason: previewPane is a BoxWithConstraints, i.e. a
+            // SubcomposeLayout, and a weighted SubcomposeLayout does not
+            // measure correctly. In portrait it took the whole column, so the
+            // mode row and shutter were squeezed to nothing and the preview
+            // rendered black - the top bar and quick bar, which are the only
+            // unweighted children above it, were the only thing on screen.
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                previewPane(Modifier.fillMaxSize())
+            }
             bottomControls()
         }
     }
