@@ -724,7 +724,16 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             // portrait stack in a landscape window leaves the shutter row
             // pushed off the bottom of something a couple of hundred dp tall.
             Row(Modifier.fillMaxSize()) {
-                previewPane(Modifier.weight(1f).fillMaxHeight())
+                // The weight goes on a plain Box, NOT on previewPane itself.
+                // previewPane is a BoxWithConstraints, which is a SubcomposeLayout,
+                // and handing a weighted SubcomposeLayout the row's leftover width
+                // left this screen with no controls at all and a full-width black
+                // preview. The Lab has always wrapped its weighted preview in a
+                // plain Box and its two-pane layout has always worked, so the two
+                // screens now use the same shape.
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    previewPane(Modifier.fillMaxSize())
+                }
                 Column(
                     Modifier
                         .width(CAMERA_PANE_W)
