@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -75,6 +77,15 @@ import com.retrocam.ui.theme.ShadcnRadius
  * actions they are legible at arm's length, which is how a camera is held.
  */
 private val HEADER_ICON = 22.dp
+
+/**
+ * Width of the control pane in the Lab's landscape layout.
+ *
+ * Wide enough for a slider with a readable label and its value, narrow enough
+ * to leave the viewfinder the larger share. 380dp is about half of a landscape
+ * phone, so the preview still dominates.
+ */
+private val LAB_PANE_W = 380.dp
 
 /**
  * The Filter Lab, as a screen of its own.
@@ -203,6 +214,132 @@ fun LabScreen(viewModel: CameraViewModel) {
 
     BackHandler { viewModel.closeLab() }
 
+    // The viewfinder, factored out so portrait and landscape can place the same
+    // thing differently. A local composable captures this scope directly, so
+    // there is no fifteen-parameter helper to keep in step with the call site.
+    @Composable
+    fun previewPane(mod: Modifier) {
+        Box(
+            mod
+                .clip(RoundedCornerShape(ShadcnRadius.Lg))
+                .background(Color.Black)
+                .onSizeChanged {
+                    if (it.width > 0 && it.height > 0) {
+                        renderer.viewAspect = it.width.toFloat() / it.height
+                    }
+                },
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    GLSurfaceView(ctx).apply {
+                        setEGLContextClientVersion(2)
+                        preserveEGLContextOnPause = true
+                        setRenderer(renderer)
+                        renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                        renderer.attach(this)
+                        glView = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            // After the AndroidView, not before: Compose draws later children on
+            // top, and a picker underneath a GLSurfaceView would never see a
+            // touch or show its outline.
+            MaskPicker(
+                enabled = stageIndex >= 0,
+                mask = state.labRecipe.stages.getOrNull(stageIndex)?.maskClamped,
+                onDrag = { x0, y0, x1, y1 ->
+                    if (stageIndex >= 0) {
+                        viewModel.setLabStageMaskFromDrag(stageIndex, x0, y0, x1, y1)
+                    }
+                },
+                modifier = Modifier.matchParentSize(),
+            )
+            ViewfinderCorners(Modifier.fillMaxSize())
+            Text(
+                "LIVE PREVIEW",
+                fontFamily = AppType.Sans,
+                fontSize = 9.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+
+    // The control panel, factored out the same way so both orientations place
+    // one definition rather than two copies of forty callbacks.
+    @Composable
+    fun labPanel(mod: Modifier) {
+        FilterLabPanel(
+            tab = state.labTab,
+            recipe = state.labRecipe,
+            intensity = state.labIntensity,
+            saved = state.labRecipes,
+            selectedRecipeId = state.savedRecipeId,
+            onTab = viewModel::setLabTab,
+            onTemplate = viewModel::setLabTemplate,
+            onKnob = viewModel::setLabKnob,
+            onResetKnob = viewModel::resetLabKnob,
+            onResetAll = viewModel::resetLabKnobs,
+            onHsl = viewModel::setHslBand,
+            onGrade = viewModel::setGrade,
+            onBw = viewModel::setBw,
+            onCal = viewModel::setCal,
+            onDefringe = viewModel::setDefringe,
+            onParametric = viewModel::setLabParametric,
+            onClearCurves = viewModel::clearLabCurves,
+            onEffect = viewModel::setLabEffect,
+            onDuoColour = viewModel::setLabDuotoneColour,
+            palette = palette,
+            watermarks = watermarks,
+            onPickWatermark = viewModel::setLabWatermark,
+            onImportWatermark = { markPicker.launch("image/*") },
+            onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
+            onExtractPalette = viewModel::extractPalette,
+            onApplyPaletteColour = viewModel::applyPaletteColour,
+            onSplitTint = viewModel::setLabSplitTint,
+            onAddStage = viewModel::addLabStage,
+            onRemoveStage = viewModel::removeLabStage,
+            onMoveStage = viewModel::moveLabStage,
+            onStageAmount = viewModel::setLabStageAmount,
+            onStageParam = viewModel::setLabStageParam,
+            onStageParamReset = viewModel::resetLabStageParam,
+            onStageMaskDrag = viewModel::setLabStageMaskFromDrag,
+            onClearStages = viewModel::clearLabStages,
+            selectedStage = stageIndex,
+            onSelectStage = { selectedStage = it },
+            onShare = viewModel::shareRecipe,
+            onExportXmp = { id ->
+                xmpExportId = id
+                val nm = state.labRecipes.firstOrNull { it.id == id }?.name ?: "PRESET"
+                xmpExportPicker.launch("$nm.xmp")
+            },
+            onImportQr = { qrPicker.launch("image/*") },
+            xmpReport = state.xmpReport,
+            onImportXmp = { xmpPicker.launch("*/*") },
+            onDismissReport = viewModel::clearXmpReport,
+            onCopyReport = { text ->
+                // The clipboard is the point: the missing scopes are the list of
+                // what a future version has to implement, and a report you can
+                // only photograph is a report nobody acts on.
+                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("RetroCam XMP report", text))
+                Feedback.info(context, "Report copied")
+            },
+            onDeleteWatermark = viewModel::deleteWatermark,
+            onUse = viewModel::useRecipeInCamera,
+            onDeleteSelected = viewModel::clearLabSelection,
+            onIntensity = viewModel::setLabIntensity,
+            onEdit = viewModel::editLabRecipe,
+            onDelete = viewModel::deleteLabRecipe,
+            modifier = mod,
+        )
+    }
+
     // A Box so the name dialog is an overlay on the whole screen rather than a
     // layout child. Inside the Column it was laid out below the panel and
     // scrolled with it, so tapping Save pushed a name field into the middle of
@@ -277,134 +414,37 @@ fun LabScreen(viewModel: CameraViewModel) {
             )
         }
 
-        // ---- the Lab's own viewfinder ----
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(230.dp)
-                .padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(ShadcnRadius.Lg))
-                .background(Color.Black)
-                .onSizeChanged {
-                    if (it.width > 0 && it.height > 0) {
-                        renderer.viewAspect = it.width.toFloat() / it.height
-                    }
-                },
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    GLSurfaceView(ctx).apply {
-                        setEGLContextClientVersion(2)
-                        preserveEGLContextOnPause = true
-                        setRenderer(renderer)
-                        renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
-                        renderer.attach(this)
-                        glView = this
-                    }
-                },
-
-
-                modifier = Modifier.fillMaxSize(),
-            )
-            // After the AndroidView, not before: Compose draws later children on
-            // top, and a picker underneath a GLSurfaceView would never see a
-            // touch or show its outline.
-            // ---- area mask picker ----
-            // A drag over the preview sets the selected stage's mask, and the
-            // outline is drawn on top so what you are selecting is visible while
-            // the filter runs underneath it. The drag only arms once a stage is
-            // selected, otherwise every tap on the viewfinder would start moving
-            // a mask nobody asked for.
-            MaskPicker(
-                enabled = stageIndex >= 0,
-                mask = state.labRecipe.stages.getOrNull(stageIndex)?.maskClamped,
-                onDrag = { x0, y0, x1, y1 ->
-                    if (stageIndex >= 0) {
-                        viewModel.setLabStageMaskFromDrag(stageIndex, x0, y0, x1, y1)
-                    }
-                },
-                modifier = Modifier.matchParentSize(),
-            )
-            ViewfinderCorners(Modifier.fillMaxSize())
-            Text(
-                "LIVE PREVIEW",
-                fontFamily = AppType.Sans,
-                fontSize = 9.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // ---- controls ----
-        FilterLabPanel(
-            tab = state.labTab,
-            recipe = state.labRecipe,
-            intensity = state.labIntensity,
-            saved = state.labRecipes,
-            selectedRecipeId = state.savedRecipeId,
-            onTab = viewModel::setLabTab,
-            onTemplate = viewModel::setLabTemplate,
-            onKnob = viewModel::setLabKnob,
-            onResetKnob = viewModel::resetLabKnob,
-            onResetAll = viewModel::resetLabKnobs,
-            onHsl = viewModel::setHslBand,
-            onGrade = viewModel::setGrade,
-            onBw = viewModel::setBw,
-            onCal = viewModel::setCal,
-            onDefringe = viewModel::setDefringe,
-            onParametric = viewModel::setLabParametric,
-            onClearCurves = viewModel::clearLabCurves,
-            onEffect = viewModel::setLabEffect,
-            onDuoColour = viewModel::setLabDuotoneColour,
-            palette = palette,
-            watermarks = watermarks,
-            onPickWatermark = viewModel::setLabWatermark,
-            onImportWatermark = { markPicker.launch("image/*") },
-            onWatermarkAlpha = viewModel::setLabWatermarkAlpha,
-            onExtractPalette = viewModel::extractPalette,
-            onApplyPaletteColour = viewModel::applyPaletteColour,
-            onSplitTint = viewModel::setLabSplitTint,
-            onAddStage = viewModel::addLabStage,
-            onRemoveStage = viewModel::removeLabStage,
-            onMoveStage = viewModel::moveLabStage,
-            onStageAmount = viewModel::setLabStageAmount,
-            onStageParam = viewModel::setLabStageParam,
-            onStageParamReset = viewModel::resetLabStageParam,
-            onStageMaskDrag = viewModel::setLabStageMaskFromDrag,
-            onClearStages = viewModel::clearLabStages,
-            selectedStage = stageIndex,
-            onSelectStage = { selectedStage = it },
-            onShare = viewModel::shareRecipe,
-            onExportXmp = { id ->
-                xmpExportId = id
-                val nm = state.labRecipes.firstOrNull { it.id == id }?.name ?: "PRESET"
-                xmpExportPicker.launch("$nm.xmp")
-            },
-            onImportQr = { qrPicker.launch("image/*") },
-            xmpReport = state.xmpReport,
-            onImportXmp = { xmpPicker.launch("*/*") },
-            onDismissReport = viewModel::clearXmpReport,
-            onCopyReport = { text ->
-                // The clipboard is the point: the missing scopes are the list of
-                // what a future version has to implement, and a report you can
-                // only photograph is a report nobody acts on.
-                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
-                cm?.setPrimaryClip(android.content.ClipData.newPlainText("RetroCam XMP report", text))
-                Feedback.info(context, "Report copied")
-            },
-            onDeleteWatermark = viewModel::deleteWatermark,
-            onUse = viewModel::useRecipeInCamera,
-            onDeleteSelected = viewModel::clearLabSelection,
-            onIntensity = viewModel::setLabIntensity,
-            onEdit = viewModel::editLabRecipe,
-            onDelete = viewModel::deleteLabRecipe,
-            )
+        // ---- viewfinder + controls ----
+        // Portrait stacks them: a fixed-height preview over a scrolling panel.
+        // Landscape puts them side by side, because a 230dp preview plus the
+        // panel leaves almost no height for the sliders on a phone turned on
+        // its side, and the panel is the part that needs the room.
+        if (isLandscape()) {
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    previewPane(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(start = 8.dp, top = 8.dp, bottom = 8.dp),
+                    )
+                }
+                labPanel(
+                    Modifier
+                        .width(LAB_PANE_W)
+                        .fillMaxHeight(),
+                )
+            }
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                previewPane(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(230.dp)
+                        .padding(horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                labPanel(Modifier.fillMaxWidth().weight(1f))
+            }
         }
 
         // The name is only ever asked for at the moment of saving, so the panel
@@ -419,6 +459,7 @@ fun LabScreen(viewModel: CameraViewModel) {
                     showSaveDialog = false
                 },
             )
+        }
         }
     }
 }
@@ -454,6 +495,9 @@ private fun SaveNameDialog(
             Modifier
                 .padding(32.dp)
                 .fillMaxWidth()
+                // Same reason as ShadcnDialog: full width in landscape is most
+                // of the screen, which is not what a name prompt should be.
+                .widthIn(max = 420.dp)
                 .clip(RoundedCornerShape(ShadcnRadius.Lg))
                 .background(MaterialTheme.colorScheme.surface)
                 .clickable(

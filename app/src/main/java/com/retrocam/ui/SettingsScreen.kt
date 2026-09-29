@@ -21,8 +21,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -76,10 +79,15 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
         uri?.let(viewModel::setSaveDirFromTree)
     }
 
+    // A settings list is a column of text: run it the full width of a landscape
+    // phone and every row is a sentence stretched across the screen, with the
+    // label at one edge and its value at the other and a void between. Capping
+    // the width and centring keeps the relationship between the two readable.
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background), contentAlignment = Alignment.TopCenter) {
     Column(
         Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .fillMaxHeight()
+            .widthIn(max = 620.dp)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp),
@@ -258,6 +266,7 @@ fun SettingsScreen(viewModel: CameraViewModel, thumbnails: Map<String, Bitmap>) 
                 }
             }
         }
+    }
     }
 
     when (dialog) {

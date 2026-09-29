@@ -10,11 +10,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,6 +71,10 @@ fun ShadcnDialog(
             Modifier
                 .padding(32.dp)
                 .fillMaxWidth()
+                // Capped, because in landscape `fillMaxWidth` is most of a
+                // screen wide and a dialog that size stops being a dialog - the
+                // list ends up with two words at one edge and two at the other.
+                .widthIn(max = 420.dp)
                 .clip(ShadcnShape.lg)
                 .background(ShadcnColor.Card)
                 .clickable(
@@ -173,6 +181,15 @@ fun ShadcnBottomSheet(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
+                // A sheet is allowed to be wide, but not edge to edge: across a
+                // landscape phone the search field and the filter strip end up
+                // with a thumb's reach of empty card either side of them. The
+                // height cap is the more important half - a sheet that is a third
+                // of the portrait height is most of a landscape window, and
+                // without the cap the filter drawer would cover the viewfinder
+                // it is being used to choose a filter for.
+                .widthIn(max = 560.dp)
+                .fillMaxHeight(0.88f)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -187,6 +204,7 @@ fun ShadcnBottomSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .clip(ShadcnShape.xl)
                     .background(ShadcnColor.Card)
                     .padding(bottom = 28.dp),

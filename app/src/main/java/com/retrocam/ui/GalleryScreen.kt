@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -108,12 +109,20 @@ fun GalleryScreen(saveDir: String, onBack: () -> Unit) {
             return@Column
         }
 
+        // More columns and a capped width in landscape. Three columns across a
+        // landscape phone gives enormous thumbnails and leaves a long empty
+        // margin either side; the extra columns are the whole point of turning
+        // the phone, and the cap stops a tablet from producing poster-sized
+        // squares.
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = GridCells.Fixed(if (isLandscape()) 5 else 3),
             contentPadding = PaddingValues(8.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .widthIn(max = 900.dp)
+                .align(Alignment.CenterHorizontally),
         ) {
             items(items, key = { it.id }) { item ->
                 GalleryCell(

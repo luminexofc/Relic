@@ -44,6 +44,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -395,16 +396,33 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
     // the image inside is cover-cropped by the renderer, never stretched.
     val aspectRatio = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
 
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // Width of the control column in landscape. Wide enough for the quick bar's
+    // four badges and the shutter row's three targets without them colliding,
+    // narrow enough that the viewfinder keeps the larger share.
+    val CAMERA_PANE_W = 300.dp
+
+    // Chrome rotation. In landscape the layout has already turned with the
+    // device, so the tilt-compensating rotation has to stand down or every
+    // control ends up turned twice - once by the layout, once here.
+    val landscape = isLandscape()
+    val chromeRotation = if (landscape) 0f else orientAngle
+
+    // The screen as three pieces, so portrait and landscape arrange the same
+    // definitions rather than two copies that have to be kept in step. Local
+    // composables capture this scope directly, so none of this needs a
+    // forty-callback parameter list.
+
+    @Composable
+    fun topControls() {
         TopBar(
-            rotation = orientAngle,
+            rotation = chromeRotation,
             showMirror = state.frontCamera,
             mirrorOn = state.mirrorFront,
             onMirror = viewModel::toggleMirror,
             onSettings = { viewModel.setSettingsOpen(true) },
         )
         QuickBar(
-            rotation = orientAngle,
+            rotation = chromeRotation,
             aspectBadge = ASPECT_LABELS[state.viewAspect.coerceIn(0, ASPECT_LABELS.lastIndex)],
             timerBadge = state.timerSeconds.takeIf { it > 0 }?.let { "${it}s" },
             gridOn = state.gridOn,
@@ -416,11 +434,12 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             onGrid = { viewModel.setGrid(!state.gridOn) },
             onFlash = viewModel::toggleFlash,
         )
+    }
 
+    @Composable
+    fun previewPane(mod: Modifier) {
         BoxWithConstraints(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth(),
+            mod,
             contentAlignment = Alignment.Center,
         ) {
             val boxW = minOf(maxWidth, maxHeight * aspectRatio)
@@ -594,7 +613,10 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             filterName = state.filter.displayName,
             onOpen = { showFilters = true },
         )
+    }
 
+    @Composable
+    fun bottomControls() {
         ModeRow(mode = state.mode, onMode = viewModel::setMode)
 
         Row(
@@ -607,7 +629,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            GalleryButton(thumb = galleryThumb, rotation = orientAngle, onClick = { galleryOpen = true })
+            GalleryButton(thumb = galleryThumb, rotation = chromeRotation, onClick = { galleryOpen = true })
             if (state.mode == "video") {
                 Surface(
                     onClick = { viewModel.toggleRecording(micGranted) },
@@ -661,7 +683,7 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 variant = ButtonVariant.Ghost,
                 size = ButtonSize.Icon,
                 leading = {
-                    Oriented(rotation = orientAngle) {
+                    Oriented(rotation = chromeRotation) {
                         key(state.frontCamera) {
                             PopIn(key = state.frontCamera, reduced = reducedMotion) {
                                 Icon(
@@ -675,6 +697,30 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                     }
                 },
             )
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (landscape) {
+            // Preview on the left, every control stacked on the right. A
+            // portrait stack in a landscape window leaves the shutter row
+            // pushed off the bottom of something a couple of hundred dp tall.
+            Row(Modifier.fillMaxSize()) {
+                previewPane(Modifier.weight(1f).fillMaxHeight())
+                Column(
+                    Modifier
+                        .width(CAMERA_PANE_W)
+                        .fillMaxHeight(),
+                ) {
+                    topControls()
+                    Spacer(Modifier.weight(1f))
+                    bottomControls()
+                }
+            }
+        } else {
+            topControls()
+            previewPane(Modifier.fillMaxWidth().weight(1f))
+            bottomControls()
         }
     }
 
