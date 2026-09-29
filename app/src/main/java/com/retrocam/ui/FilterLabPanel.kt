@@ -164,6 +164,7 @@ fun FilterLabPanel(
             LabTab("BASIC", tab == 0, accent, Modifier.weight(1f)) { onTab(0) }
             LabTab("ADVANCED", tab == 1, accent, Modifier.weight(1f)) { onTab(1) }
             LabTab("STAGES", tab == 2, accent, Modifier.weight(1f)) { onTab(2) }
+            LabTab("PRESETS", tab == 3, accent, Modifier.weight(1f)) { onTab(3) }
         }
 
         if (tab == 2) {
@@ -198,6 +199,34 @@ fun FilterLabPanel(
             TemplateCarousel(recipe.templateId, accent, dim, onTemplate)
             Spacer(Modifier.height(6.dp))
             LabSlider("INTENSITY", intensity, 0f, 1f, accent, dim, onIntensity)
+        } else if (tab == 3) {
+            // Where a preset is brought in and where it is kept. Both were
+            // scattered before: the import chip sat in Basic, the list sat below
+            // whichever panel was open, so you could never see what you already
+            // had while deciding what to import next.
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ImportChip("IMPORT .XMP", accent) { onImportXmp() }
+                Text(
+                    "Lightroom / Camera Raw preset",
+                    fontFamily = AppType.Sans, fontSize = 9.sp, color = dim,
+                )
+            }
+            xmpReport?.let { XmpReportBlock(it, accent, dim, onDismissReport, onCopyReport) }
+            PresetSection(
+                saved = saved,
+                selectedRecipeId = selectedRecipeId,
+                accent = accent,
+                dim = dim,
+                onEdit = onEdit,
+                onShare = onShare,
+                onExportXmp = onExportXmp,
+                onDelete = onDelete,
+                onImportQr = onImportQr,
+            )
         } else {
             // The six Lightroom-style groups, chosen from a row of icons.
             //
@@ -309,109 +338,146 @@ fun FilterLabPanel(
             )
         }
 
-        // ---- saved recipes ----
-        if (saved.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("MY RECIPES", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
-                Text(
-                    "+ IMPORT QR",
-                    fontFamily = AppType.Sans,
-                    fontSize = 10.sp,
-                    color = accent,
-                    modifier = Modifier.clickable(onClick = onImportQr).padding(4.dp),
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .height((saved.size * 44).coerceAtMost(132).dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                saved.forEach { r ->
-                    val selected = r.id == selectedRecipeId
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+    }
+}
+
+/**
+ * The kept presets: everything the user has saved, imported or built, with the
+ * actions that apply to one.
+ *
+ * Its own tab rather than a block under whichever panel happened to be open,
+ * because it is the one place a preset is both brought in and kept, and
+ * burying it below the Advanced tab meant the import and the list were never on
+ * screen at the same time.
+ */
+@Composable
+private fun PresetSection(
+    saved: List<SavedRecipe>,
+    selectedRecipeId: String?,
+    accent: androidx.compose.ui.graphics.Color,
+    dim: androidx.compose.ui.graphics.Color,
+    onEdit: (String) -> Unit,
+    onShare: (String) -> Unit,
+    onExportXmp: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onImportQr: () -> Unit,
+) {
+    if (saved.isEmpty()) {
+        // The list is the point of the tab, so an empty one has to say so rather
+        // than showing a blank panel under the import chip.
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "NO PRESETS YET",
+            fontFamily = AppType.Sans, fontSize = 10.sp, color = dim,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Import an .xmp from Lightroom, or build a look and save it with the " +
+                "save icon at the top.",
+            fontFamily = AppType.Sans, fontSize = 9.sp, color = dim.copy(alpha = 0.8f),
+        )
+    }
+    if (saved.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("MY RECIPES", fontFamily = AppType.Sans, fontSize = 10.sp, color = dim)
+            Text(
+                "+ IMPORT QR",
+                fontFamily = AppType.Sans,
+                fontSize = 10.sp,
+                color = accent,
+                modifier = Modifier.clickable(onClick = onImportQr).padding(4.dp),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .height((saved.size * 44).coerceAtMost(132).dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            saved.forEach { r ->
+                val selected = r.id == selectedRecipeId
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
+                        )
+                        .clickable { onEdit(r.id) }
+                        .padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        r.name,
+                        fontFamily = AppType.Sans,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 12.sp,
+                        color = if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ShadcnButton(
+                        onClick = { onEdit(r.id) },
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        modifier = Modifier.size(30.dp),
+                        leading = {
+                            Icon(
+                                Icons.Filled.Edit,
+                                "Edit ${r.name}",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(16.dp),
                             )
-                            .clickable { onEdit(r.id) }
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            r.name,
-                            fontFamily = AppType.Sans,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = 12.sp,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f),
-                        )
-                        ShadcnButton(
-                            onClick = { onEdit(r.id) },
-                            variant = ButtonVariant.Ghost,
-                            size = ButtonSize.Icon,
-                            modifier = Modifier.size(30.dp),
-                            leading = {
-                                Icon(
-                                    Icons.Filled.Edit,
-                                    "Edit ${r.name}",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                        )
-                        ShadcnButton(
-                            onClick = { onShare(r.id) },
-                            variant = ButtonVariant.Ghost,
-                            size = ButtonSize.Icon,
-                            modifier = Modifier.size(30.dp),
-                            leading = {
-                                Icon(
-                                    Icons.Filled.QrCode,
-                                    "Share ${r.name} as QR",
-                                    tint = ShadcnColor.Primary,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                        )
-                        ShadcnButton(
-                            onClick = { onExportXmp(r.id) },
-                            variant = ButtonVariant.Ghost,
-                            size = ButtonSize.Icon,
-                            modifier = Modifier.size(30.dp),
-                            leading = {
-                                Icon(
-                                    Icons.Filled.Description,
-                                    "Save ${r.name} as XMP",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                        )
-                        ShadcnButton(
-                            onClick = { onDelete(r.id) },
-                            variant = ButtonVariant.Ghost,
-                            size = ButtonSize.Icon,
-                            modifier = Modifier.size(30.dp),
-                            leading = {
-                                Icon(
-                                    Icons.Filled.Delete,
-                                    "Delete ${r.name}",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            },
-                        )
-                    }
+                        },
+                    )
+                    ShadcnButton(
+                        onClick = { onShare(r.id) },
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        modifier = Modifier.size(30.dp),
+                        leading = {
+                            Icon(
+                                Icons.Filled.QrCode,
+                                "Share ${r.name} as QR",
+                                tint = ShadcnColor.Primary,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
+                    ShadcnButton(
+                        onClick = { onExportXmp(r.id) },
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        modifier = Modifier.size(30.dp),
+                        leading = {
+                            Icon(
+                                Icons.Filled.Description,
+                                "Save ${r.name} as XMP",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
+                    ShadcnButton(
+                        onClick = { onDelete(r.id) },
+                        variant = ButtonVariant.Ghost,
+                        size = ButtonSize.Icon,
+                        modifier = Modifier.size(30.dp),
+                        leading = {
+                            Icon(
+                                Icons.Filled.Delete,
+                                "Delete ${r.name}",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        },
+                    )
                 }
             }
         }
