@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -217,56 +218,72 @@ fun LabScreen(viewModel: CameraViewModel) {
     // The viewfinder, factored out so portrait and landscape can place the same
     // thing differently. A local composable captures this scope directly, so
     // there is no fifteen-parameter helper to keep in step with the call site.
+    //
+    // The box takes the camera's aspect ratio rather than whatever shape the
+    // caller hands it, exactly as the camera screen's finder does. It did not
+    // before, and the renderer covers the feed to the box: a 9:16 feed in a
+    // wide landscape box is scaled about 2.6x to fill it, so the preview was a
+    // blocky over-zoomed crop. In portrait the fixed 230dp box had the same
+    // mismatch, just a less obvious one.
+    val previewAspect = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
     @Composable
     fun previewPane(mod: Modifier) {
-        Box(
-            mod
-                .clip(RoundedCornerShape(ShadcnRadius.Lg))
-                .background(Color.Black)
-                .onSizeChanged {
-                    if (it.width > 0 && it.height > 0) {
-                        renderer.viewAspect = it.width.toFloat() / it.height
-                    }
-                },
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    GLSurfaceView(ctx).apply {
-                        setEGLContextClientVersion(2)
-                        preserveEGLContextOnPause = true
-                        setRenderer(renderer)
-                        renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
-                        renderer.attach(this)
-                        glView = this
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-            // After the AndroidView, not before: Compose draws later children on
-            // top, and a picker underneath a GLSurfaceView would never see a
-            // touch or show its outline.
-            MaskPicker(
-                enabled = stageIndex >= 0,
-                mask = state.labRecipe.stages.getOrNull(stageIndex)?.maskClamped,
-                onDrag = { x0, y0, x1, y1 ->
-                    if (stageIndex >= 0) {
-                        viewModel.setLabStageMaskFromDrag(stageIndex, x0, y0, x1, y1)
-                    }
-                },
-                modifier = Modifier.matchParentSize(),
-            )
-            ViewfinderCorners(Modifier.fillMaxSize())
-            Text(
-                "LIVE PREVIEW",
-                fontFamily = AppType.Sans,
-                fontSize = 9.sp,
-                color = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-            )
+        Box(mod, contentAlignment = Alignment.Center) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val w = minOf(maxWidth, maxHeight * previewAspect)
+                val h = w / previewAspect
+                Box(
+                    Modifier
+                        .width(w)
+                        .height(h)
+                        .clip(RoundedCornerShape(ShadcnRadius.Lg))
+                        .background(Color.Black)
+                        .onSizeChanged {
+                            if (it.width > 0 && it.height > 0) {
+                                renderer.viewAspect = it.width.toFloat() / it.height
+                            }
+                        },
+                ) {
+                AndroidView(
+                    factory = { ctx ->
+                        GLSurfaceView(ctx).apply {
+                            setEGLContextClientVersion(2)
+                            preserveEGLContextOnPause = true
+                            setRenderer(renderer)
+                            renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+                            renderer.attach(this)
+                            glView = this
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // After the AndroidView, not before: Compose draws later children on
+                // top, and a picker underneath a GLSurfaceView would never see a
+                // touch or show its outline.
+                MaskPicker(
+                    enabled = stageIndex >= 0,
+                    mask = state.labRecipe.stages.getOrNull(stageIndex)?.maskClamped,
+                    onDrag = { x0, y0, x1, y1 ->
+                        if (stageIndex >= 0) {
+                            viewModel.setLabStageMaskFromDrag(stageIndex, x0, y0, x1, y1)
+                        }
+                    },
+                    modifier = Modifier.matchParentSize(),
+                )
+                        ViewfinderCorners(Modifier.fillMaxSize())
+                    Text(
+                        "LIVE PREVIEW",
+                        fontFamily = AppType.Sans,
+                        fontSize = 9.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .background(Color.Black.copy(alpha = 0.4f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
 

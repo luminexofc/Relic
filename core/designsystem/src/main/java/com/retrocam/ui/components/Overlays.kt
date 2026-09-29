@@ -10,14 +10,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -167,6 +168,15 @@ fun ShadcnBottomSheet(
         animationSpec = tween(ShadcnMotion.ENTER, easing = ShadcnMotion.Easing),
         label = "sheetIn",
     )
+    // The cap belongs on the CARD, not on the box that positions it.
+    //
+    // Putting fillMaxHeight on the positioning box made the box 88% of the
+    // window while the card inside it still wrapped its own content, so the
+    // card sat at the TOP of that tall invisible box and the sheet appeared to
+    // float in the middle of the screen with a gap under it. The box has to
+    // keep wrapping the card and stay pinned to the bottom; only the card's own
+    // height is capped.
+    val maxCardHeight = (LocalConfiguration.current.screenHeightDp * 0.88f).dp
     Box(
         Modifier
             .fillMaxSize()
@@ -181,15 +191,10 @@ fun ShadcnBottomSheet(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                // A sheet is allowed to be wide, but not edge to edge: across a
-                // landscape phone the search field and the filter strip end up
-                // with a thumb's reach of empty card either side of them. The
-                // height cap is the more important half - a sheet that is a third
-                // of the portrait height is most of a landscape window, and
-                // without the cap the filter drawer would cover the viewfinder
-                // it is being used to choose a filter for.
+                // Wide is fine for a sheet; edge to edge is not. Across a
+                // landscape phone the search field and the filter strip would
+                // otherwise have a thumb's reach of empty card either side.
                 .widthIn(max = 560.dp)
-                .fillMaxHeight(0.88f)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -204,6 +209,12 @@ fun ShadcnBottomSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    // Bounded, and scrollable so nothing becomes unreachable
+                    // once it is. Without this the filter drawer is about a
+                    // third of a portrait screen, which is most of a landscape
+                    // one - it would cover the viewfinder it exists to choose a
+                    // filter for.
+                    .heightIn(max = maxCardHeight)
                     .verticalScroll(rememberScrollState())
                     .clip(ShadcnShape.xl)
                     .background(ShadcnColor.Card)
