@@ -394,7 +394,10 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
 
     // The finder box itself takes the chosen ratio (like the stock camera);
     // the image inside is cover-cropped by the renderer, never stretched.
-    val aspectRatio = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
+    // Reciprocal in landscape: the chosen ratio is a portrait framing, but the
+    // buffer CameraX delivers in landscape is already turned, so a tall box
+    // around wide content crops the preview to a slice.
+    val aspectRatio = previewAspect(state.viewAspect)
 
     // Width of the control column in landscape. Wide enough for the quick bar's
     // four badges and the shutter row's three targets without them colliding,

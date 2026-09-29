@@ -22,3 +22,28 @@ import androidx.compose.ui.platform.LocalConfiguration
 @ReadOnlyComposable
 fun isLandscape(): Boolean =
     LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+/**
+ * The live preview's aspect ratio for the current orientation.
+ *
+ * [ASPECT_RATIOS] is a list of portrait framings - 4:3, 16:9, 1:1, 2:3, 3:2 -
+ * which is how the choice is labelled and how a photo is framed. In landscape,
+ * though, CameraX hands the surface a buffer it has already turned to match the
+ * display, so the content is wide while the ratio still says tall. Sizing a
+ * portrait-shaped box around wide content makes the renderer's cover-crop keep
+ * only a narrow vertical slice of the frame, which looks exactly like the
+ * preview having gone sideways.
+ *
+ * The reciprocal is the same framing expressed in the turned frame - 4:3
+ * becomes 3:4 - and 1:1 maps to itself, so one rule covers the whole list. It
+ * is also what the capture should use, since the saved photo takes the shape of
+ * the frame that was composed on screen.
+ *
+ * Shared by the camera and the Lab so the two cannot drift apart again.
+ */
+@Composable
+@ReadOnlyComposable
+fun previewAspect(viewAspect: Int): Float {
+    val portrait = ASPECT_RATIOS[viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
+    return if (isLandscape()) 1f / portrait else portrait
+}

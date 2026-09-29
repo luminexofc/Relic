@@ -225,7 +225,7 @@ fun LabScreen(viewModel: CameraViewModel) {
     // wide landscape box is scaled about 2.6x to fill it, so the preview was a
     // blocky over-zoomed crop. In portrait the fixed 230dp box had the same
     // mismatch, just a less obvious one.
-    val previewAspect = ASPECT_RATIOS[state.viewAspect.coerceIn(0, ASPECT_RATIOS.lastIndex)]
+    val previewAspect = previewAspect(state.viewAspect)
     @Composable
     fun previewPane(mod: Modifier) {
         Box(mod, contentAlignment = Alignment.Center) {
