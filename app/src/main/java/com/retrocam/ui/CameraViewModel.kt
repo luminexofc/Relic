@@ -126,6 +126,26 @@ class CameraViewModel @Inject constructor(
         viewModelScope.launch { settings.setStripHintSeen() }
     }
 
+    /**
+     * Every message already shown this session, so a warning about stored data
+     * is said once rather than on every emission.
+     */
+    private val said = mutableSetOf<String>()
+
+    /**
+     * Tells the user what failed, in words they can act on.
+     *
+     * Every one of these paths used to be a bare `return`, which made a save that
+     * did nothing look exactly like a save that worked. Deduplicated on the
+     * message rather than on a timer because the settings collector re-runs on
+     * every stored preference - an un-deduplicated warning would reappear on
+     * every rotation and every slider tick, and a warning you have to dismiss
+     * thirty times a minute stops being read.
+     */
+    private fun notice(message: String) {
+        if (said.add(message)) Feedback.info(context, message)
+    }
+
     private var previewOwner: LifecycleOwner? = null
     private var previewTexture: SurfaceTexture? = null
     private var glRenderer: FilterRenderer? = null
@@ -209,6 +229,7 @@ class CameraViewModel @Inject constructor(
         val r = overlayRaster.importWatermark(uri)
         val entry = r.getOrNull()
         if (entry == null) {
+            notice("Couldn't use that image as a logo")
             Feedback.error(context)
             return
         }
@@ -286,7 +307,10 @@ class CameraViewModel @Inject constructor(
     /** Shares a saved recipe as a QR image. */
     fun shareRecipe(id: String) {
         val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
-        if (!QrShare.share(context, r)) Feedback.error(context)
+        if (!QrShare.share(context, r)) {
+            notice("Couldn't share that preset")
+            Feedback.error(context)
+        }
     }
 
     /**
@@ -304,7 +328,11 @@ class CameraViewModel @Inject constructor(
                 it.write(doc.toByteArray())
             } ?: throw IllegalStateException("no stream")
         }.isSuccess
-        if (ok) Feedback.info(context, "XMP saved") else Feedback.error(context)
+        if (ok) Feedback.info(context, "XMP saved")
+        else {
+            notice("Couldn't write the file - try a different folder")
+            Feedback.error(context)
+        }
     }
 
     /**
@@ -317,27 +345,39 @@ class CameraViewModel @Inject constructor(
     fun importRecipe(uri: android.net.Uri) {
         val r = QrShare.import(context, uri)
         if (r == null) {
+            notice("That isn't a preset QR code")
             Feedback.error(context)
             return
         }
         viewModelScope.launch {
+            // Appended to the stored strings, never decoded-and-re-encoded. A
+            // rewrite built from decoded recipes drops every entry this version
+            // cannot read, so importing one QR quietly deleted all the others -
+            // the same bug keepRecipe had. Nothing already stored is touched.
             val current = settings.customRecipes.first()
-                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
-            if (current.none { it.id == r.id }) {
-                settings.setCustomRecipes(
-                    (current + r).map { com.retrocam.catalog.lab.RecipeCodec.encode(it) },
-                )
+            if (current.none { raw -> com.retrocam.catalog.lab.RecipeCodec.decode(raw)?.id == r.id }) {
+                settings.setCustomRecipes(current + com.retrocam.catalog.lab.RecipeCodec.encode(r))
             }
             // A recipe whose base filter this install no longer has cannot render,
             // so do not select it; it stays in the list for later.
             if (r.toSpec() != null) {
-                _uiState.update { it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab) }
+                // Selected, like an XMP import is. Leaving savedRecipeId unset
+                // meant a QR-imported preset loaded into the controls but left
+                // the "use in camera" button hidden, because that button is
+                // drawn from the selection.
+                _uiState.update {
+                    it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab, savedRecipeId = r.id)
+                }
+            } else {
+                notice("Preset added, but it needs an effect this version no longer has")
             }
+            Feedback.info(context, "Preset imported")
         }
     }
 
     fun deleteWatermark(id: String) {
         if (!overlayRaster.deleteWatermark(id)) {
+            notice("Couldn't delete that logo")
             Feedback.error(context)
             return
         }
@@ -396,14 +436,40 @@ class CameraViewModel @Inject constructor(
                 val folder = args[8] as String
                 val mirror = args[9] as Boolean
                 val card = args[10] as Boolean
-                // Unparseable entries are dropped, and so are recipes whose base
-                // filter has been removed: a shared recipe pointing at a filter we
-                // no longer ship has nothing to render.
-                val recipes = (args[11] as List<String>)
-                    .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
-                    .filter { it.toSpec() != null }
-                FullState(fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes)
-            }.collect { (fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes) ->
+                // Recipes can be unreadable for two different reasons, and the
+                // user can only fix one of them, so they are counted separately
+                // rather than folded into a single silent mapNotNull. The counts
+                // ride along in FullState purely so the user can be told.
+                var unreadable = 0
+                var noBase = 0
+                @Suppress("UNCHECKED_CAST")
+                val recipes = (args[11] as List<String>).mapNotNull { raw ->
+                    val r = com.retrocam.catalog.lab.RecipeCodec.decode(raw)
+                    when {
+                        r == null -> { unreadable++; null }
+                        r.toSpec() == null -> { noBase++; null }
+                        else -> r
+                    }
+                }
+                FullState(fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes, unreadable, noBase)
+            }.collect { (fav, grid, sound, paper, timer, aspect, format, preview, folder, mirror, card, recipes, unreadable, noBase) ->
+                // Said here rather than at the point of failure because the
+                // failure is not actionable by the user and never will be: the
+                // only honest thing to do is tell them the filter is not coming
+                // back and why, once, instead of leaving a gap in the strip that
+                // looks like the save never happened.
+                if (unreadable > 0) {
+                    notice(
+                        if (unreadable == 1) "1 saved filter could not be opened - it was made by an older version"
+                        else "$unreadable saved filters could not be opened - they were made by an older version",
+                    )
+                }
+                if (noBase > 0) {
+                    notice(
+                        if (noBase == 1) "1 saved filter needs an effect this version no longer has"
+                        else "$noBase saved filters need effects this version no longer has",
+                    )
+                }
                 _uiState.update {
                     it.copy(
                         specs = orderSpecs(fav, recipes),
@@ -704,11 +770,13 @@ class CameraViewModel @Inject constructor(
             }
         }.getOrNull()
         if (text.isNullOrBlank()) {
+            notice("Couldn't open that file - is it really an .xmp preset?")
             Feedback.error(context)
             return
         }
         val result = com.retrocam.catalog.lab.XmpImport.parse(text)
         if (result.isEmpty) {
+            notice("No photo settings found in that file")
             Feedback.error(context)
             return
         }
@@ -985,25 +1053,37 @@ class CameraViewModel @Inject constructor(
      * Persists [lab] under [name], replacing any recipe with the same content
      * hash, and selects it. Shared by the save button and the XMP import so both
      * land in the preset list the same way.
+     *
+     * Returns whether it was actually written, so a caller can tell the user it
+     * worked instead of saying so regardless - which is the bug this whole
+     * change is about.
      */
-    private fun keepRecipe(name: String, lab: com.retrocam.catalog.lab.LabRecipe) {
+    private fun keepRecipe(name: String, lab: com.retrocam.catalog.lab.LabRecipe): Boolean {
         val saved = com.retrocam.catalog.lab.SavedRecipe.create(
             name = name.take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME),
             baseId = baseFilterToSaveOn(_uiState.value.labBaseId),
             lab = lab,
         )
         if (saved.toSpec() == null) {
+            notice("Couldn't save - this preset has nothing to apply")
             Feedback.error(context)
-            return
+            return false
         }
         viewModelScope.launch {
-            val merged = (settings.customRecipes.first()
-                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
-                .filter { it.id != saved.id }) + saved
-            settings.setCustomRecipes(merged.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
+            // Merged on the raw stored strings, NOT on decoded recipes.
+            // Decoding first and re-encoding the survivors drops every recipe
+            // this version cannot read - so every save quietly deleted the
+            // user's other presets, and the strip appeared to eat them. Nothing
+            // here is rewritten unless it is genuinely the recipe being
+            // replaced, so an unreadable entry stays exactly as it was stored.
+            val kept = settings.customRecipes.first().filterNot { raw ->
+                com.retrocam.catalog.lab.RecipeCodec.decode(raw)?.id == saved.id
+            }
+            settings.setCustomRecipes(kept + com.retrocam.catalog.lab.RecipeCodec.encode(saved))
             settings.setIntensity(saved.id, _uiState.value.labIntensity)
             _uiState.update { it.copy(savedRecipeId = saved.id, labName = saved.name) }
         }
+        return true
     }
 
     /**
@@ -1020,7 +1100,13 @@ class CameraViewModel @Inject constructor(
         // Remember which recipe this draft is, so "use in camera" knows what to
         // hand over without re-deriving it from the name.
         pendingSelectedRecipe = null
-        keepRecipe(s.labName.ifBlank { s.labBaseId.uppercase() }, s.labRecipe)
+        // Confirmed here rather than inside keepRecipe, so the XMP import - the
+        // other caller - reports its own outcome instead of stacking a second
+        // toast on top of "XMP imported". One confirmation per action, and only
+        // when something was really written.
+        if (keepRecipe(s.labName.ifBlank { s.labBaseId.uppercase() }, s.labRecipe)) {
+            Feedback.info(context, "Saved")
+        }
     }
 
     /** Forgets the current selection, hiding the bridge button. */
@@ -1038,8 +1124,20 @@ class CameraViewModel @Inject constructor(
      * DataStore, so both sides read the same list without sharing any state.
      */
     fun useRecipeInCamera(id: String) {
-        val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
-        val spec = r.toSpec() ?: return
+        // Both of these used to be a bare `return`, so pressing a button that
+        // could not do anything looked identical to pressing one that could.
+        val r = _uiState.value.labRecipes.firstOrNull { it.id == id }
+        if (r == null) {
+            notice("That preset is no longer saved")
+            Feedback.error(context)
+            return
+        }
+        val spec = r.toSpec()
+        if (spec == null) {
+            notice("This preset needs an effect this version no longer has")
+            Feedback.error(context)
+            return
+        }
         _uiState.update { it.copy(filter = spec, mode = MODE_PHOTO) }
         viewModelScope.launch {
             settings.setIntensity(spec.id, _uiState.value.labIntensity)
@@ -1047,14 +1145,41 @@ class CameraViewModel @Inject constructor(
                 it.copy(intensity = it.labIntensity, sizeScale = 1f, detailScale = 1f)
             }
         }
+        Feedback.info(context, "${r.name} applied")
     }
 
     fun deleteLabRecipe(id: String) {
         viewModelScope.launch {
-            val kept = settings.customRecipes.first()
-                .mapNotNull { com.retrocam.catalog.lab.RecipeCodec.decode(it) }
-                .filter { it.id != id }
-            settings.setCustomRecipes(kept.map { com.retrocam.catalog.lab.RecipeCodec.encode(it) })
+            // Same reason as keepRecipe: filter the raw strings rather than
+            // decoding and re-encoding, so deleting one preset cannot take the
+            // unreadable ones down with it.
+            val kept = settings.customRecipes.first().filterNot { raw ->
+                com.retrocam.catalog.lab.RecipeCodec.decode(raw)?.id == id
+            }
+            settings.setCustomRecipes(kept)
+            // Deleting the preset you are looking at must also empty the
+            // controls. The preset is gone, so leaving its values sitting in the
+            // draft is a filter the user cannot get back, cannot see the source
+            // of, and will be silently re-saved by the next tap of the save
+            // button. Only the deleted preset is cleared: deleting some other
+            // preset while editing this one must not throw away the edit.
+            _uiState.update { s ->
+                if (s.savedRecipeId != id) s
+                else s.copy(
+                    labRecipe = com.retrocam.catalog.lab.LabRecipe(),
+                    labName = "",
+                    savedRecipeId = null,
+                )
+            }
+            // The other half of the same problem: "use in camera" copies the
+            // recipe into the live filter, so deleting the preset used to leave
+            // the camera preview still showing a look that no longer exists and
+            // can no longer be re-selected from the strip. Put the camera back
+            // on the plain original filter.
+            _uiState.update { s ->
+                if (s.filter.id != id) s else s.copy(filter = com.retrocam.catalog.FilterCatalog.default)
+            }
+            Feedback.info(context, "Preset deleted")
         }
     }
 
@@ -1247,6 +1372,7 @@ class CameraViewModel @Inject constructor(
             val resolver = context.contentResolver
             val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
+                notice("Couldn't start the video - storage may be full")
                 Feedback.error(context)
                 return@launch
             }
@@ -1257,6 +1383,7 @@ class CameraViewModel @Inject constructor(
             }
             if (pfd == null) {
                 resolver.delete(uri, null, null)
+                notice("Couldn't write the video - try changing the save folder")
                 Feedback.error(context)
                 return@launch
             }
@@ -1275,6 +1402,7 @@ class CameraViewModel @Inject constructor(
                     }
                 } else {
                     runCatching { resolver.delete(uri, null, null) }
+                    notice("Recording failed - not enough space or storage is busy")
                     Feedback.error(context)
                 }
             }
@@ -1302,7 +1430,11 @@ class CameraViewModel @Inject constructor(
                         runCatching { resolver.delete(uri, null, null) }
                     }
                 }
-                if (ok) Feedback.saved(context) else Feedback.error(context)
+                if (ok) Feedback.saved(context)
+                else {
+                    notice("Couldn't finish saving the video")
+                    Feedback.error(context)
+                }
             }
             videoUri = null
         }
@@ -1385,6 +1517,13 @@ class CameraViewModel @Inject constructor(
         val mirror: Boolean,
         val card: Boolean,
         val recipes: List<com.retrocam.catalog.lab.SavedRecipe>,
+        /**
+         * Stored recipes we could not read at all, and stored recipes we could
+         * read but have nothing to render. Kept apart so the messages can say
+         * which of the two happened: one is the app's fault, the other is not.
+         */
+        val unreadable: Int,
+        val noBase: Int,
     )
 
     companion object {
