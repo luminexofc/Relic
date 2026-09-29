@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -185,17 +186,29 @@ fun LabScreen(viewModel: CameraViewModel) {
     }
 
     // Bind the camera to the Lab's own SurfaceTexture as soon as that texture
-    // exists.
+    // exists, AND again whenever the display orientation changes.
     //
-    // This was missing, and the preview was sampling a texture that had never
-    // received a frame: the camera screen's dispose calls detachPreview() and
-    // nothing ever re-bound the camera here, because the ON_RESUME branch below
-    // only fires on a real resume, and switching between Camera and Lab is a
-    // composable branch inside one activity rather than a new one. What the
-    // shader sampled was uninitialised buffer memory, which is the blocky mess
-    // the viewfinder was showing and which no amount of aspect-ratio work could
-    // have fixed. CameraScreen has always done this; the Lab did not.
-    LaunchedEffect(texture) {
+    // The bind itself was missing, and the preview was sampling a texture that
+    // had never received a frame: the camera screen's dispose calls
+    // detachPreview() and nothing ever re-bound the camera here, because the
+    // ON_RESUME branch below only fires on a real resume, and switching between
+    // Camera and Lab is a composable branch inside one activity rather than a
+    // new one. What the shader sampled was uninitialised buffer memory, which
+    // is the blocky mess the viewfinder was showing and which no amount of
+    // aspect-ratio work could have fixed. CameraScreen has always done this; the
+    // Lab did not.
+    //
+    // The orientation key is the second half of the same story. The rotation the
+    // renderer applies comes from the SurfaceTexture's own transform, which
+    // CameraX fills in for the display orientation current when it issues the
+    // surface request. Rotate the phone and the transform has to be re-issued
+    // or the shader keeps applying the portrait one, and the viewfinder ends up
+    // showing the scene turned on its side - which is what the landscape Lab was
+    // doing while the surrounding UI stayed upright. Re-binding on orientation
+    // change is one unbindAll plus one bind, once per rotation, and it does not
+    // depend on CameraX having noticed the change for this particular surface.
+    val displayOrientation = LocalConfiguration.current.orientation
+    LaunchedEffect(texture, displayOrientation) {
         texture?.let { viewModel.attachPreview(lifecycleOwner, it) }
     }
 

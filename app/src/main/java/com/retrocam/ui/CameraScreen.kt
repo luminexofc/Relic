@@ -102,6 +102,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -317,7 +318,16 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
             reticleAt = null
         }
     }
-    LaunchedEffect(texture) {
+    // Re-bind on orientation change as well as on first texture. The rotation
+    // the renderer applies comes from the SurfaceTexture's own transform, which
+    // CameraX fills in for the display orientation at the moment it issues the
+    // surface request. If the surface is not re-requested when the phone turns,
+    // the shader keeps applying the transform it was given for the old
+    // orientation and the viewfinder shows the scene on its side. Doing it here
+    // as well as in the Lab keeps the two from behaving differently; it costs
+    // one unbind and bind per rotation.
+    val displayOrientation = LocalConfiguration.current.orientation
+    LaunchedEffect(texture, displayOrientation) {
         texture?.let {
             viewModel.attachPreview(lifecycleOwner, it)
             viewModel.syncRenderer(renderer)
