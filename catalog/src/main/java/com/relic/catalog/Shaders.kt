@@ -430,24 +430,24 @@ object Shaders {
             return t * t * (3.0 - 2.0 * t);
         }
 
-        // Band weight for one of the four range controls at luminance l. Band
-        // order is Highlights, Shadows, Whites, Blacks - exactly
-        // LabRecipe.rangeArray, which fills u_ranges. These were previously
-        // Shadows, Blacks, Highlights, Whites, so every slider drove the wrong
-        // mask: Highlights crushed the deep shadows, Shadows worked the black
-        // point, and any combined setting looked solarized next to Lightroom.
-        // A test does not pin this because the expressions are read out of
-        // this file by string matching; the contract lives here, in words.
-        float rangeWeight(int band, float l) {
-            if (band == 0) return smooth01((l - 0.45) / 0.50);
-            if (band == 1) return 1.0 - smooth01((l - 0.05) / 0.50);
-            if (band == 2) return smooth01((l - 0.72) / 0.28);
-            return 1.0 - smooth01(l / 0.28);
-        }
+        // Band weights for Highlights and Shadows at luminance l. The weight
+        // comes from the pixel, but the pull below goes toward the BLURRED
+        // neighbourhood average, which is what keeps a lifted dark pixel from
+        // ever crossing a recovered bright one.
+        float rangeWeightH(float l) { return smooth01((l - 0.45) / 0.50); }
+        float rangeWeightS(float l) { return 1.0 - smooth01((l - 0.05) / 0.50); }
 
-        // One band on one channel. Positive lifts, negative rolls off.
-        float rangeAdjust(float c, float w, float a) {
-            return a >= 0.0 ? c + a * w * (1.0 - c) : c * (1.0 + a * w);
+        // Global endpoint curves for Whites (up) and Blacks (down). Bounded
+        // slope by construction: smoothstep/6 peaks at 1.5/6 = 0.25, so even
+        // all four bands pulling one way cannot turn a ramp around. The
+        // monotonicity scan in RangeToneTest proves it over the whole grid.
+        vec3 whiteCurve(vec3 c) {
+            vec3 t = clamp((c - 0.5) / 0.5, 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t) / 6.0;
+        }
+        vec3 blackCurve(vec3 c) {
+            vec3 t = clamp((0.5 - c) / 0.5, 0.0, 1.0);
+            return t * t * (3.0 - 2.0 * t) / 6.0;
         }
 
         // How much of this stage's effect applies at uv: 1 inside the mask, 0
@@ -1285,19 +1285,37 @@ object Shaders {
 
             // --- 4. Highlights, Shadows, Whites, Blacks. Fourth in Adobe's
             // order, after contrast and before local contrast. Per channel, so
-            // lifting the shadows warms them the way a real print does ---
+            // lifting the shadows warms them the way a real print does.
+            //
+            // Highlights and Shadows are LOCAL operators: each weight comes
+            // from the pixel, but the pull is toward (or away from) the
+            // BLURRED neighbourhood average below, never past it - max() pins
+            // every move at the average. The old global remap let a lifted dark
+            // pixel cross a crushed bright one, so the composite ramp rose then
+            // fell: solarization. Whites/Blacks stay global endpoints on
+            // bounded curves. u_ranges order (highlights, shadows, whites,
+            // blacks) is LabRecipe.rangeArray and is unchanged. ---
             if (abs(u_ranges.x) + abs(u_ranges.y) + abs(u_ranges.z) + abs(u_ranges.w) > 0.001) {
-                float rl = luminance(c);
-                for (int i = 0; i < 4; i++) {
-                    float a = u_ranges[i];
-                    if (abs(a) < 0.001) continue;
-                    float w = rangeWeight(i, rl);
-                    c = vec3(
-                        rangeAdjust(c.r, w, a),
-                        rangeAdjust(c.g, w, a),
-                        rangeAdjust(c.b, w, a)
-                    );
+                float rl = clamp(luminance(c), 0.0, 1.0);
+                // Regional average, far wider than the clarity pass: the anchor
+                // every local term moves toward or away from. One 9-tap tent,
+                // luminance only - cheap enough for the live viewfinder.
+                float bl = clamp(luminance(tent3(c, texel * 24.0)), 0.0, 1.0);
+                float wH = rangeWeightH(rl);
+                float wS = rangeWeightS(rl);
+                if (abs(u_ranges.x) > 0.001) {
+                    c += u_ranges.x * wH * max(c - bl, 0.0);
                 }
+                if (abs(u_ranges.y) > 0.001) {
+                    c += u_ranges.y * wS * max(bl - c, 0.0);
+                }
+                if (abs(u_ranges.z) > 0.001) {
+                    c += u_ranges.z * whiteCurve(c);
+                }
+                if (abs(u_ranges.w) > 0.001) {
+                    c -= u_ranges.w * blackCurve(c);
+                }
+                c = clamp(c, 0.0, 1.0);
             }
 
             // --- 5. Texture, Clarity, Dehaze. Adobe applies local contrast

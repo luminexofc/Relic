@@ -1,5 +1,7 @@
 package com.relic.catalog.lab
 
+import kotlin.math.max
+
 /**
  * Filter Lab colour grading: the four-step colour transform that turns a
  * template plus five knobs into a single matrix the shader can apply.
@@ -215,5 +217,39 @@ object RangeTone {
     fun smooth01(x: Float): Float {
         val t = x.coerceIn(0f, 1f)
         return t * t * (3f - 2f * t)
+    }
+
+    /**
+     * Highlights weight at luminance [l], mirroring `rangeWeightH` in the
+     * shader. Same expression the old per-pixel `highlightWeight` used; what
+     * changed is what the weight multiplies, not the mask itself.
+     */
+    fun stageWeightH(l: Float): Float = smooth01((l - 0.45f) / 0.50f)
+
+    /** Shadows weight at luminance [l], mirroring `rangeWeightS`. */
+    fun stageWeightS(l: Float): Float = 1f - smooth01((l - 0.05f) / 0.50f)
+
+    /** Whites endpoint curve, mirroring `whiteCurve` (smoothstep/6). */
+    fun whiteCurve(c: Float): Float = smooth01((c - 0.5f) / 0.5f) / 6f
+
+    /** Blacks endpoint curve, mirroring `blackCurve`. */
+    fun blackCurve(c: Float): Float = smooth01((0.5f - c) / 0.5f) / 6f
+
+    /**
+     * One channel through the range stage, mirroring the shader term for
+     * term: local Highlights/Shadows pulls against the neighbourhood average
+     * [bl], global Whites/Blacks endpoint curves, clamped.
+     *
+     * [l] is the pixel's own luminance; on a test ramp it equals [c], exactly
+     * as the shader's clamped `rl` does for in-range inputs.
+     */
+    fun rangeStage(c: Float, bl: Float, aH: Float, aS: Float, aW: Float, aB: Float): Float {
+        val l = c.coerceIn(0f, 1f)
+        var o = c
+        o += aH * stageWeightH(l) * max(c - bl, 0f)
+        o += aS * stageWeightS(l) * max(bl - c, 0f)
+        o += aW * whiteCurve(c)
+        o -= aB * blackCurve(c)
+        return o.coerceIn(0f, 1f)
     }
 }

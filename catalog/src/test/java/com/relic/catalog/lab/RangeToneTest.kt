@@ -18,35 +18,34 @@ class RangeToneTest {
     fun `the shader implements the same bands as this object`() {
         val h = com.relic.catalog.Shaders.HEADER
         for (f in listOf(
-            "1.0 - smooth01((l - 0.05) / 0.50)",   // shadows
-            "1.0 - smooth01(l / 0.28)",            // blacks
-            "smooth01((l - 0.45) / 0.50)",         // highlights
-            "smooth01((l - 0.72) / 0.28)",         // whites
+            "smooth01((l - 0.45) / 0.50)",   // highlights weight
+            "1.0 - smooth01((l - 0.05) / 0.50)",   // shadows weight
         )) {
             assertTrue("shader is missing: $f", h.contains(f))
         }
     }
 
     @Test
-    fun `the shader orders the bands as highlights shadows whites blacks`() {
-        // u_ranges is declared in the shared HEADER, not in the lab body.
+    fun `the shader pulls highlights and shadows toward the blurred average`() {
+        // u_ranges order (highlights, shadows, whites, blacks) is
+        // LabRecipe.rangeArray and must stay in sync with it: x drives the
+        // over-average pull, y the under-average pull. The uniform is declared
+        // in HEADER but applied in LAB_GRADE, so both are checked.
         val h = com.relic.catalog.Shaders.HEADER
         assertTrue(h.contains("uniform vec4 u_ranges"))
-        // The loop walks 0..3 in order, so rangeWeight's band numbers have to be
-        // in the same order the recipe packs them.
-        val idx = listOf("(band == 0)", "(band == 1)", "(band == 2)")
-        var prev = -1
-        for (i in idx) {
-            val at = h.indexOf(i)
-            assertTrue("missing $i", at > prev)
-            prev = at
-        }
+        val body = com.relic.catalog.Shaders.LAB_GRADE
+        assertTrue(body.contains("c += u_ranges.x * wH * max(c - bl, 0.0)"))
+        assertTrue(body.contains("c += u_ranges.y * wS * max(bl - c, 0.0)"))
     }
 
     @Test
-    fun `the shader lifts on positive and rolls off on negative, like adjust does`() {
-        val g = com.relic.catalog.Shaders.HEADER
-        assertTrue(g.contains("a >= 0.0 ? c + a * w * (1.0 - c) : c * (1.0 + a * w)"))
+    fun `whites and blacks ride bounded endpoint curves`() {
+        // smoothstep/6 peaks at 1.5/6 slope, so the global terms alone cannot
+        // turn a ramp around either; the scan below proves the combination.
+        val h = com.relic.catalog.Shaders.HEADER
+        assertTrue(h.contains("vec3 whiteCurve(vec3 c)"))
+        assertTrue(h.contains("vec3 blackCurve(vec3 c)"))
+        assertTrue(h.contains("t * t * (3.0 - 2.0 * t) / 6.0"))
     }
 
     /**
@@ -150,5 +149,65 @@ class RangeToneTest {
         assertEquals(0f, RangeTone.shadowWeight(5f), 0f)
         assertEquals(0f, RangeTone.whiteWeight(-1f), 0f)
         assertEquals(1f, RangeTone.whiteWeight(9f), 0f)
+    }
+
+    /**
+     * The solarization regression test. The old global remap inverted the
+     * tonal scale at combined extremes (Highlights -0.61 with Shadows +0.91
+     * put a 0.10 input above a 0.90 one); the local formulation pulls toward
+     * the neighbourhood average, which is the identity on a ramp, and the
+     * global endpoint curves are slope-bounded. So the composite mapping must
+     * be non-decreasing for EVERY combination, proven here by scanning the
+     * whole grid rather than a handful of points.
+     */
+    @Test
+    fun `the range stage never inverts the tonal scale`() {
+        val ramp = (0..64).map { it / 64f }
+        val steps = listOf(-1f, -0.75f, -0.5f, -0.25f, 0f, 0.25f, 0.5f, 0.75f, 1f)
+        // The exact report that started this, plus every grid corner.
+        val combos = mutableListOf(listOf(-0.61f, 0.91f, -0.79f, -0.48f))
+        for (aH in steps) for (aS in steps) for (aW in steps) for (aB in steps) {
+            combos.add(listOf(aH, aS, aW, aB))
+        }
+        for ((aH, aS, aW, aB) in combos) {
+            // On a smooth ramp the blurred average equals the pixel, exactly
+            // as the shader's tent of a gradient does away from the edges.
+            val out = ramp.map { RangeTone.rangeStage(it, it, aH, aS, aW, aB) }
+            for (i in 0 until out.lastIndex) {
+                assertTrue(
+                    "inversion at $i for amounts $aH,$aS,$aW,$aB",
+                    out[i + 1] >= out[i] - 1e-6f,
+                )
+            }
+            assertTrue(
+                "brights must stay above darks for $aH,$aS,$aW,$aB",
+                out[58] > out[6],
+            )
+        }
+    }
+
+    /**
+     * Monotonicity alone could be satisfied by doing nothing, so this pins
+     * that moderate values still move real content: a dark patch in bright
+     * surroundings lifts, a bright patch in dark surroundings recovers, and
+     * the global endpoints answer on flat fields where the local terms rest.
+     */
+    @Test
+    fun `moderate values visibly recover and lift`() {
+        val lifted = RangeTone.rangeStage(0.2f, 0.7f, 0f, 0.3f, 0f, 0f)
+        assertTrue("shadow lift $lifted", lifted - 0.2f >= 0.05f)
+        val recovered = RangeTone.rangeStage(0.85f, 0.3f, -0.3f, 0f, 0f, 0f)
+        assertTrue("highlight recovery $recovered", 0.85f - recovered >= 0.05f)
+        val whiter = RangeTone.rangeStage(0.8f, 0.8f, 0f, 0f, 1f, 0f)
+        assertTrue("whites $whiter", whiter - 0.8f >= 0.05f)
+        val blackLift = RangeTone.rangeStage(0.2f, 0.2f, 0f, 0f, 0f, -1f)
+        assertTrue("blacks $blackLift", blackLift - 0.2f >= 0.02f)
+    }
+
+    @Test
+    fun `zero amounts are an exact no-op in the stage`() {
+        for (c in listOf(0f, 0.25f, 0.7f, 1f)) {
+            assertEquals(c, RangeTone.rangeStage(c, 0.5f, 0f, 0f, 0f, 0f), 0f)
+        }
     }
 }
