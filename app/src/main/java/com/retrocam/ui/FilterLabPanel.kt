@@ -27,8 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -138,7 +138,6 @@ fun FilterLabPanel(
     selectedRecipeId: String?,
     onUse: (String) -> Unit,
     onUseDraft: () -> Unit,
-    onRequestSave: () -> Unit,
     onDeleteSelected: () -> Unit,
     onIntensity: (Float) -> Unit,
     onEdit: (String) -> Unit,
@@ -185,6 +184,8 @@ fun FilterLabPanel(
                 selected = selectedStage,
                 onSelect = onSelectStage,
             )
+            Spacer(Modifier.height(10.dp))
+            UseInCameraButton(onClick = onUseDraft)
         } else if (tab == 0) {
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -205,20 +206,7 @@ fun FilterLabPanel(
             // with no save and no strip entry in between. Saving is for looks
             // you built yourself; a premade you have not kept is not yours yet.
             Spacer(Modifier.height(10.dp))
-            ShadcnButton(
-                text = "Use in camera",
-                onClick = onUseDraft,
-                modifier = Modifier.fillMaxWidth(),
-                size = ButtonSize.Lg,
-                leading = {
-                    Icon(
-                        Icons.Filled.Send,
-                        contentDescription = null,
-                        tint = ShadcnColor.PrimaryForeground,
-                        modifier = Modifier.size(15.dp),
-                    )
-                },
-            )
+            UseInCameraButton(onClick = onUseDraft)
         } else if (tab == 3) {
             // Where a preset is brought in and where it is kept. Both were
             // scattered before: the import chip sat in Basic, the list sat below
@@ -326,17 +314,11 @@ fun FilterLabPanel(
                     KnobSliders(LabKnobGroup.OPTICS, recipe, accent, dim, onKnob, onResetKnob)
                 }
             }
+            // Saving moved to the SAVE XMP button in the top bar, so this tab
+            // keeps exactly one primary action like every other tab: the draft
+            // goes straight to the camera, exactly what the preview is showing.
             Spacer(Modifier.height(8.dp))
-            // Advanced saves as a shareable .xmp file, named first. The header
-            // save icon does the same thing from this tab; this button exists
-            // because a screen with no save on it reads as a screen that
-            // cannot save - which is the report that started this.
-            ShadcnButton(
-                text = "Save as .XMP",
-                onClick = onRequestSave,
-                modifier = Modifier.fillMaxWidth(),
-                size = ButtonSize.Lg,
-            )
+            UseInCameraButton(onClick = onUseDraft)
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 ShadcnButton(
@@ -348,28 +330,44 @@ fun FilterLabPanel(
             }
         }
 
-        // ---- the bridge: hand the draft to the camera ----
-        // Saving and using are separate on purpose. The two halves only meet
-        // here, so this is the one action that crosses between them.
-        if (selectedRecipeId != null) {
+        // No global bridge button here anymore. It used to sit below every tab,
+        // so Basic showed two "Use in camera" buttons at once whenever a preset
+        // was selected: its own draft one plus this one. Each tab now owns its
+        // single primary action, and the Presets tab below is the one place a
+        // saved selection is handed to the camera.
+        if (tab == 3 && selectedRecipeId != null) {
             Spacer(Modifier.height(10.dp))
-            ShadcnButton(
-                text = "Use in camera",
-                onClick = { onUse(selectedRecipeId) },
-                modifier = Modifier.fillMaxWidth(),
-                size = ButtonSize.Lg,
-                leading = {
-                    Icon(
-                        Icons.Filled.Send,
-                        contentDescription = null,
-                        tint = ShadcnColor.PrimaryForeground,
-                        modifier = Modifier.size(15.dp),
-                    )
-                },
-            )
+            UseInCameraButton(onClick = { onUse(selectedRecipeId) })
         }
 
     }
+}
+
+/**
+ * The single primary action of every Lab tab: what the preview is showing
+ * goes to the main camera.
+ *
+ * One composable so the four call sites cannot drift into two buttons again.
+ * Which recipe it carries differs per tab - the draft on Basic, Advanced and
+ * Stages, the selected preset on Presets - and that choice lives with the
+ * caller, not here.
+ */
+@Composable
+private fun UseInCameraButton(onClick: () -> Unit) {
+    ShadcnButton(
+        text = "Use in camera",
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        size = ButtonSize.Lg,
+        leading = {
+            Icon(
+                Icons.Filled.Send,
+                contentDescription = null,
+                tint = ShadcnColor.PrimaryForeground,
+                modifier = Modifier.size(15.dp),
+            )
+        },
+    )
 }
 
 /**
@@ -433,15 +431,24 @@ private fun PresetSection(
         ) {
             saved.forEach { r ->
                 val selected = r.id == selectedRecipeId
+                // The selection is a box, not just a tint: a tint alone reads
+                // as a pressed state and vanishes for anyone not looking for
+                // it, while the box says "this is the one Use in camera takes".
                 Row(
                     Modifier
                         .fillMaxWidth()
                         .height(44.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(
                             if (selected) MaterialTheme.colorScheme.surface else Color.Transparent,
                         )
+                        .border(
+                            1.dp,
+                            if (selected) accent else dim.copy(alpha = 0.25f),
+                            RoundedCornerShape(10.dp),
+                        )
                         .clickable { onEdit(r.id) }
-                        .padding(horizontal = 4.dp),
+                        .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -467,6 +474,9 @@ private fun PresetSection(
                             )
                         },
                     )
+                    // A share icon that shares: the row hands out a real .xmp
+                    // file, not a QR picture only this app can read back. The
+                    // QR path still exists for bringing presets in.
                     ShadcnButton(
                         onClick = { onShare(r.id) },
                         variant = ButtonVariant.Ghost,
@@ -474,8 +484,8 @@ private fun PresetSection(
                         modifier = Modifier.size(30.dp),
                         leading = {
                             Icon(
-                                Icons.Filled.QrCode,
-                                "Share ${r.name} as QR",
+                                Icons.Filled.Share,
+                                "Share ${r.name} as XMP",
                                 tint = ShadcnColor.Primary,
                                 modifier = Modifier.size(16.dp),
                             )

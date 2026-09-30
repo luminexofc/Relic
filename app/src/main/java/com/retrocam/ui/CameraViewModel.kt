@@ -304,11 +304,45 @@ class CameraViewModel @Inject constructor(
 
     // ---- sharing ----
 
-    /** Shares a saved recipe as a QR image. */
-    fun shareRecipe(id: String) {
+    /**
+     * Shares a saved recipe as an `.xmp` file.
+     *
+     * Written to the shared cache dir and handed out through the app's
+     * FileProvider, mirroring [QrShare.share], so any app that takes a file
+     * gets a real preset file - Lightroom included - rather than a picture
+     * of a QR code that only this app can read back.
+     */
+    fun shareRecipeXmp(id: String) {
         val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
-        if (!QrShare.share(context, r)) {
+        val doc = com.retrocam.catalog.lab.XmpExport.export(r.lab, r.name)
+        val file = try {
+            val dir = java.io.File(context.cacheDir, "shared").apply { mkdirs() }
+            java.io.File(dir, "${r.name}.xmp").apply { writeText(doc) }
+        } catch (t: Throwable) {
+            null
+        }
+        if (file == null) {
             notice("Couldn't share that preset")
+            Feedback.error(context)
+            return
+        }
+        val uri = runCatching {
+            androidx.core.content.FileProvider.getUriForFile(context, "com.retrocam.fileprovider", file)
+        }.getOrNull()
+        if (uri == null) {
+            notice("Couldn't share that preset")
+            Feedback.error(context)
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "application/xml"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            context.startActivity(Intent.createChooser(send, "Share ${r.name}").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) {
+            notice("No app available to share with")
             Feedback.error(context)
         }
     }
@@ -834,11 +868,13 @@ class CameraViewModel @Inject constructor(
         // appeared in the Presets list at all, so it had to be re-typed and
         // saved by hand before it existed anywhere - which is the opposite of
         // what importing a preset is for. Kept under the name the file carries,
-        // falling back to the base filter's name when the file has none.
+        // then the picked document's own name, and only then the base filter's
+        // name when neither exists.
         val keepAs = result.name?.takeIf { it.isNotBlank() }
+            ?: documentName(uri)?.uppercase()
             ?: _uiState.value.labBaseId.uppercase()
         keepRecipe(keepAs, _uiState.value.labRecipe)
-        Feedback.info(context, "XMP imported")
+        Feedback.info(context, "Imported $keepAs")
     }
 
     private var preXmpDraft: com.retrocam.catalog.lab.LabRecipe? = null
@@ -1205,14 +1241,15 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Writes the current draft out as a shareable `.xmp` file.
+     * Saves the current draft as a shareable `.xmp` file, named by the user
+     * first, and keeps it in the preset list under the same name.
      *
-     * This is the Advanced-tab save: every slider value goes into a Lightroom
-     * preset, named by the user first. Nothing is written to the internal
-     * preset list - a shareable file and a stored preset are different things,
-     * and conflating them is why saves seemed to vanish.
+     * Both halves happen on one tap on purpose. A file without a list entry
+     * cannot be re-used without re-importing it, and a list entry without a
+     * file is not shareable - doing only one is why custom looks seemed to
+     * vanish. One confirmation covers both, so success is never ambiguous.
      */
-    fun exportDraftXmp(name: String, uri: android.net.Uri) {
+    fun saveDraftXmp(name: String, uri: android.net.Uri) {
         val clean = name.trim().uppercase().take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)
         if (clean.isBlank()) {
             notice("Give it a name first")
@@ -1223,19 +1260,40 @@ class CameraViewModel @Inject constructor(
             Feedback.info(context, "Nothing to save yet")
             return
         }
+        val kept = keepRecipe(clean, _uiState.value.labRecipe)
         val doc = com.retrocam.catalog.lab.XmpExport.export(_uiState.value.labRecipe, clean)
-        val ok = runCatching {
+        val written = runCatching {
             context.contentResolver.openOutputStream(uri)?.use {
                 it.write(doc.toByteArray())
             } ?: throw IllegalStateException("no stream")
         }.isSuccess
-        if (ok) {
-            _uiState.update { it.copy(labName = clean) }
-            Feedback.info(context, "Saved $clean.xmp")
+        if (kept && written) {
+            Feedback.info(context, "Saved $clean")
+        } else if (kept) {
+            notice("Kept $clean, but the file couldn't be written")
+            Feedback.error(context)
         } else {
             notice("Couldn't write the file - try a different folder")
             Feedback.error(context)
         }
+    }
+
+    /**
+     * The file's own display name, without its extension.
+     *
+     * A preset file does not always carry `crs:Name`, and falling back to the
+     * base filter's name called every such import ORIGINAL. The document the
+     * user picked usually has a real name, so that is what the preset takes.
+     */
+    private fun documentName(uri: android.net.Uri): String? {
+        val display = runCatching {
+            context.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i >= 0 && c.moveToFirst()) c.getString(i) else null
+            }
+        }.getOrNull()
+        return display?.substringAfterLast('/')?.substringBeforeLast('.')
+            ?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     fun deleteLabRecipe(id: String) {
@@ -1273,11 +1331,19 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    /** Loads a saved recipe back into the draft for editing. */
+    /**
+     * Loads a saved recipe back into the draft for editing.
+     *
+     * Stays on the current tab on purpose: jumping to Advanced on every tap
+     * meant selecting a preset in the Presets list yanked you to another
+     * screen, so the selection highlight you just earned was never seen. The
+     * sliders follow the preset wherever you are; switch tabs to look at them.
+     */
     fun editLabRecipe(id: String) {
         val r = _uiState.value.labRecipes.firstOrNull { it.id == id } ?: return
+        pendingSelectedRecipe = null
         _uiState.update {
-            it.copy(labTab = 1, labName = r.name, labBaseId = r.baseId, labRecipe = r.lab, savedRecipeId = r.id)
+            it.copy(labName = r.name, labBaseId = r.baseId, labRecipe = r.lab, savedRecipeId = r.id)
         }
     }
 

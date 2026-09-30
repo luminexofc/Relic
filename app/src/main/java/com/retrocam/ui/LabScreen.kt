@@ -25,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.retrocam.ui.components.ShadcnInput
@@ -181,7 +180,7 @@ fun LabScreen(viewModel: CameraViewModel) {
         rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri ->
             val name = draftExportName
             draftExportName = null
-            if (name != null && uri != null) viewModel.exportDraftXmp(name, uri)
+            if (name != null && uri != null) viewModel.saveDraftXmp(name, uri)
         }
 
     // The Lab's own renderer, not the camera's. syncRenderer is what tells the
@@ -385,7 +384,7 @@ fun LabScreen(viewModel: CameraViewModel) {
             onClearStages = viewModel::clearLabStages,
             selectedStage = stageIndex,
             onSelectStage = { selectedStage = it },
-            onShare = viewModel::shareRecipe,
+            onShare = viewModel::shareRecipeXmp,
             onExportXmp = { id ->
                 xmpExportId = id
                 val nm = state.labRecipes.firstOrNull { it.id == id }?.name ?: "PRESET"
@@ -406,7 +405,6 @@ fun LabScreen(viewModel: CameraViewModel) {
             onDeleteWatermark = viewModel::deleteWatermark,
             onUse = viewModel::useRecipeInCamera,
             onUseDraft = viewModel::useDraftInCamera,
-            onRequestSave = { showSaveDialog = true },
             onDeleteSelected = viewModel::clearLabSelection,
             onIntensity = viewModel::setLabIntensity,
             onEdit = viewModel::editLabRecipe,
@@ -455,33 +453,23 @@ fun LabScreen(viewModel: CameraViewModel) {
             // asked for once you actually tap it, so a slider you keep nudging
             // never puts a text field in the way.
             //
-            // Always clickable, never silently dead. A disabled icon swallows
-            // the tap with no feedback, which is exactly the "save button feels
-            // completely dead" report when the enabled flag lags the draft. The
-            // dimmed tint still says "nothing to save", but the tap itself
-            // answers with why.
+            // A labelled button rather than a bare save icon, so its promise is
+            // readable: the draft leaves as a shareable .xmp file AND is kept in
+            // the preset list under the same name. Always clickable, never
+            // silently dead: the tap answers even when there is nothing to save.
             ShadcnButton(
+                text = "SAVE XMP",
                 onClick = {
                     if (!canSave) Feedback.info(context, "Nothing to save yet")
                     else showSaveDialog = true
                 },
-                variant = ButtonVariant.Ghost,
-                size = ButtonSize.Icon,
-                enabled = true,
-                leading = {
-                    Icon(
-                        Icons.Filled.Save,
-                        "Save this look",
-                        tint = if (canSave) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.35f),
-                        modifier = Modifier.size(HEADER_ICON),
-                    )
-                },
+                variant = if (canSave) ButtonVariant.Default else ButtonVariant.Outline,
+                size = ButtonSize.Sm,
             )
             // A real gap, not the 0dp padding a bare icon button uses. Save and
             // flip are two different actions on opposite sides of the screen's
-            // purpose, and with nothing between them the save icon reads as part
-            // of the flip control.
+            // purpose, and with nothing between them the save control reads as
+            // part of the flip control.
             Spacer(Modifier.width(14.dp))
             ShadcnButton(
                 onClick = { viewModel.flipCamera() },
@@ -538,31 +526,26 @@ fun LabScreen(viewModel: CameraViewModel) {
             }
         }
 
-        // The name is only ever asked for at the moment of saving, so the panel
-        // has no text field in it at all while you are adjusting sliders.
-        //
-        // What "save" means depends on the tab. Advanced is the XMP path:
-        // every slider value leaves as a shareable Lightroom preset file, so
-        // the name goes into the file picker, not the internal list. Every
-        // other tab keeps the internal save.
+        }
+        // The name dialog is a direct child of the outer Box - an overlay over
+        // the whole screen - and NOT a child of the Column above. Inside the
+        // Column it was measured with the leftover height after the viewfinder
+        // and the panel had taken theirs, which is zero, so tapping save
+        // composed an invisible dialog: the "save button is completely dead"
+        // report, with no error anywhere because nothing had actually failed.
         if (showSaveDialog) {
             SaveNameDialog(
                 initial = state.labName.ifBlank { state.labBaseId.uppercase() },
-                title = if (state.labTab == 1) "NAME THIS XMP" else "NAME THIS LOOK",
+                title = "NAME THIS XMP",
                 onDismiss = { showSaveDialog = false },
                 onConfirm = { name ->
                     viewModel.setLabName(name)
-                    if (state.labTab == 1) {
-                        draftExportName = name.trim().uppercase()
-                            .take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)
-                        draftExportPicker.launch("${draftExportName}.xmp")
-                    } else {
-                        viewModel.saveLab()
-                    }
+                    draftExportName = name.trim().uppercase()
+                        .take(com.retrocam.catalog.lab.SavedRecipe.MAX_NAME)
                     showSaveDialog = false
+                    draftExportPicker.launch("${draftExportName}.xmp")
                 },
             )
-        }
         }
     }
 }
