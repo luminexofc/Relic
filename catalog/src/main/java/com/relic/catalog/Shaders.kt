@@ -431,14 +431,18 @@ object Shaders {
         }
 
         // Band weight for one of the four range controls at luminance l. Band
-        // order is Highlights, Shadows, Whites, Blacks, matching RangeTone in
-        // Kotlin. That object is the testable copy of this arithmetic and a
-        // test reads these exact expressions out of this file to check it.
+        // order is Highlights, Shadows, Whites, Blacks - exactly
+        // LabRecipe.rangeArray, which fills u_ranges. These were previously
+        // Shadows, Blacks, Highlights, Whites, so every slider drove the wrong
+        // mask: Highlights crushed the deep shadows, Shadows worked the black
+        // point, and any combined setting looked solarized next to Lightroom.
+        // A test does not pin this because the expressions are read out of
+        // this file by string matching; the contract lives here, in words.
         float rangeWeight(int band, float l) {
-            if (band == 0) return 1.0 - smooth01((l - 0.05) / 0.50);
-            if (band == 1) return 1.0 - smooth01(l / 0.28);
-            if (band == 2) return smooth01((l - 0.45) / 0.50);
-            return smooth01((l - 0.72) / 0.28);
+            if (band == 0) return smooth01((l - 0.45) / 0.50);
+            if (band == 1) return 1.0 - smooth01((l - 0.05) / 0.50);
+            if (band == 2) return smooth01((l - 0.72) / 0.28);
+            return 1.0 - smooth01(l / 0.28);
         }
 
         // One band on one channel. Positive lifts, negative rolls off.
