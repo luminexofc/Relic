@@ -166,18 +166,25 @@ fun LabScreen(viewModel: CameraViewModel) {
     }
     // Exporting a curated preset as a shareable .xmp file. The pending id is
     // needed because CreateDocument's callback only hands back the uri.
+    //
+    // Mime type is */* and not application/xml on purpose: the system picker
+    // appends the extension matching a declared type, so application/xml
+    // turned every "NAME.xmp" into "NAME.xmp.xml". With */* the suggested
+    // name is kept verbatim.
     var xmpExportId by remember { mutableStateOf<String?>(null) }
     val xmpExportPicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri ->
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
             val id = xmpExportId
             xmpExportId = null
             if (id != null && uri != null) viewModel.exportXmp(id, uri)
         }
     // Advanced-tab save: the draft itself as an .xmp file, named first.
     // CreateDocument only returns the uri, so the name waits here meanwhile.
+    // Same */* reason as above: a declared xml type renames "NAME.xmp" to
+    // "NAME.xmp.xml".
     var draftExportName by remember { mutableStateOf<String?>(null) }
     val draftExportPicker =
-        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/xml")) { uri ->
+        rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
             val name = draftExportName
             draftExportName = null
             if (name != null && uri != null) viewModel.saveDraftXmp(name, uri)
