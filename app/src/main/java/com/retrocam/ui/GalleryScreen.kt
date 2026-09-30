@@ -372,6 +372,11 @@ private fun ViewerOverlay(
                         Icon(Icons.Filled.Share, "Share", tint = Color.White)
                     },
                 )
+                // Share and delete sat edge to edge, so a thumb aiming for one
+                // kept landing on the other. Same 14dp the Lab keeps between
+                // its own header actions.
+                Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(14.dp))
                 ShadcnButton(
                     onClick = { confirmDelete = true },
                     variant = ButtonVariant.Ghost,
@@ -393,7 +398,11 @@ private fun ViewerOverlay(
                     .onSizeChanged { frameSize = it }
                     .pointerInput(item.id, cropping) {
                         if (item.isVideo || !cropping) return@pointerInput
-                        var anchor: Offset? = null
+                        // Standard crop handles: 4 corners, 4 edges, move by
+                        // dragging inside. Grab radius in px, generous on
+                        // purpose - a 2px border is not a touch target.
+                        val grabR = 28f * density
+                        var grab = -1
                         fun toUv(p: Offset): Offset {
                             val r = fittedRect() ?: return Offset(0f, 0f)
                             return Offset(
@@ -401,20 +410,102 @@ private fun ViewerOverlay(
                                 (1f - (p.y - r.top) / r.height()).coerceIn(0f, 1f),
                             )
                         }
+                        // Box-px corners of the current rect: TL, TR, BL, BR.
+                        fun pxCorners(): Array<Offset>? {
+                            val r = fittedRect() ?: return null
+                            val uv = cropUv ?: return null
+                            val w = r.width()
+                            val h = r.height()
+                            val x0 = r.left + uv[0] * w
+                            val x1 = r.left + uv[2] * w
+                            val yT = r.top + (1f - uv[3]) * h
+                            val yB = r.top + (1f - uv[1]) * h
+                            return arrayOf(
+                                Offset(x0, yT), Offset(x1, yT),
+                                Offset(x0, yB), Offset(x1, yB),
+                            )
+                        }
                         detectDragGestures(
-                            onDragStart = { anchor = toUv(it); cropUv = null },
-                            onDrag = { change, _ ->
-                                change.consume()
-                                val a = anchor ?: toUv(change.position)
-                                val c = toUv(change.position)
-                                anchor = a
-                                cropUv = floatArrayOf(
-                                    minOf(a.x, c.x), minOf(a.y, c.y),
-                                    maxOf(a.x, c.x), maxOf(a.y, c.y),
-                                )
+                            onDragStart = { pos ->
+                                val cs = pxCorners()
+                                if (cs != null) {
+                                    // Corners first: they sit on the edges, so an
+                                    // edge test would steal them.
+                                    grab = cs.indexOfFirst { (it - pos).getDistance() <= grabR }
+                                }
+                                val r = fittedRect()
+                                val uv = cropUv
+                                if (grab < 0 && r != null && uv != null) {
+                                    val x0 = r.left + uv[0] * r.width()
+                                    val x1 = r.left + uv[2] * r.width()
+                                    val yT = r.top + (1f - uv[3]) * r.height()
+                                    val yB = r.top + (1f - uv[1]) * r.height()
+                                    grab = when {
+                                        // Edges, each tested as a strip so a slow
+                                        // diagonal drag does not slip off mid-gesture.
+                                        kotlin.math.abs(pos.x - x0) <= grabR && pos.y in yT..yB -> 4
+                                        kotlin.math.abs(pos.y - yT) <= grabR && pos.x in x0..x1 -> 5
+                                        kotlin.math.abs(pos.x - x1) <= grabR && pos.y in yT..yB -> 6
+                                        kotlin.math.abs(pos.y - yB) <= grabR && pos.x in x0..x1 -> 7
+                                        pos.x in x0..x1 && pos.y in yT..yB -> 8
+                                        else -> -1
+                                    }
+                                }
                             },
-                            onDragEnd = { anchor = null },
-                            onDragCancel = { anchor = null },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                val r = fittedRect()
+                                val cur = cropUv
+                                if (r != null && cur != null && grab in 0..8) {
+                                    val uv = cur.copyOf()
+                                val w = r.width()
+                                val h = r.height()
+                                val minU = 0.06f
+                                when (grab) {
+                                    // Corners pin the opposite corner and pull
+                                    // their own, floored at a minimum size.
+                                    0 -> {
+                                        uv[0] = toUv(change.position).x.coerceIn(0f, uv[2] - minU)
+                                        uv[3] = toUv(change.position).y.coerceIn(uv[1] + minU, 1f)
+                                    }
+                                    1 -> {
+                                        uv[2] = toUv(change.position).x.coerceIn(uv[0] + minU, 1f)
+                                        uv[3] = toUv(change.position).y.coerceIn(uv[1] + minU, 1f)
+                                    }
+                                    2 -> {
+                                        uv[0] = toUv(change.position).x.coerceIn(0f, uv[2] - minU)
+                                        uv[1] = toUv(change.position).y.coerceIn(0f, uv[3] - minU)
+                                    }
+                                    3 -> {
+                                        uv[2] = toUv(change.position).x.coerceIn(uv[0] + minU, 1f)
+                                        uv[1] = toUv(change.position).y.coerceIn(0f, uv[3] - minU)
+                                    }
+                                    4 -> uv[0] = toUv(change.position).x.coerceIn(0f, uv[2] - minU)
+                                    5 -> uv[3] = toUv(change.position).y.coerceIn(uv[1] + minU, 1f)
+                                    6 -> uv[2] = toUv(change.position).x.coerceIn(uv[0] + minU, 1f)
+                                    7 -> uv[1] = toUv(change.position).y.coerceIn(0f, uv[3] - minU)
+                                    8 -> {
+                                        // Move: shift in uv, clamped so the
+                                        // rect never leaves the photo.
+                                        val dx = amount.x / w
+                                        val dy = -amount.y / h
+                                        val sx = (dx).coerceIn(-uv[0], 1f - uv[2])
+                                        val sy = (dy).coerceIn(-uv[1], 1f - uv[3])
+                                        uv[0] += sx
+                                        uv[2] += sx
+                                        uv[1] += sy
+                                        uv[3] += sy
+                                    }
+                                    // Unknown grab is nobody's drag: not a handle,
+                                    // not inside. Anything else would move a rect
+                                    // the finger never took hold of.
+                                    else -> Unit
+                                }
+                                cropUv = uv
+                                }
+                            },
+                            onDragEnd = { grab = -1 },
+                            onDragCancel = { grab = -1 },
                         )
                     },
                 contentAlignment = Alignment.Center,
@@ -428,22 +519,45 @@ private fun ViewerOverlay(
                         modifier = Modifier.fillMaxSize().padding(8.dp),
                     )
                 }
-                // The outline of the pending crop, in box pixels.
+                // The crop window: dimmed surround, white border, thirds grid
+                // and corner dots - the same visual language every gallery app
+                // uses, so there is nothing new to learn.
                 val uv = cropUv
                 val r = fittedRect()
                 if (cropping && uv != null && r != null) {
                     Canvas(Modifier.fillMaxSize()) {
-                        val tl = Offset(r.left + uv[0] * r.width(), r.top + (1f - uv[3]) * r.height())
-                        val br = Offset(r.left + uv[2] * r.width(), r.top + (1f - uv[1]) * r.height())
+                        val w = r.width()
+                        val h = r.height()
+                        val cx0 = r.left + uv[0] * w
+                        val cx1 = r.left + uv[2] * w
+                        val cyT = r.top + (1f - uv[3]) * h
+                        val cyB = r.top + (1f - uv[1]) * h
+                        val shade = Color.Black.copy(alpha = 0.55f)
+                        drawRect(shade, Offset(0f, 0f), Size(size.width, cyT))
+                        drawRect(shade, Offset(0f, cyB), Size(size.width, size.height - cyB))
+                        drawRect(shade, Offset(0f, cyT), Size(cx0, cyB - cyT))
+                        drawRect(shade, Offset(cx1, cyT), Size(size.width - cx1, cyB - cyT))
                         drawRect(
                             color = Color.White,
-                            topLeft = tl,
+                            topLeft = Offset(cx0, cyT),
                             size = Size(
-                                (br.x - tl.x).coerceAtLeast(1f),
-                                (br.y - tl.y).coerceAtLeast(1f),
+                                (cx1 - cx0).coerceAtLeast(1f),
+                                (cyB - cyT).coerceAtLeast(1f),
                             ),
                             style = Stroke(width = 2f),
                         )
+                        val grid = Color.White.copy(alpha = 0.7f)
+                        for (i in 1..2) {
+                            val gx = cx0 + (cx1 - cx0) * i / 3f
+                            drawLine(grid, Offset(gx, cyT), Offset(gx, cyB), strokeWidth = 1f)
+                            val gy = cyT + (cyB - cyT) * i / 3f
+                            drawLine(grid, Offset(cx0, gy), Offset(cx1, gy), strokeWidth = 1f)
+                        }
+                        val dotR = 6f * density
+                        listOf(
+                            Offset(cx0, cyT), Offset(cx1, cyT),
+                            Offset(cx0, cyB), Offset(cx1, cyB),
+                        ).forEach { drawCircle(Color.White, dotR, it) }
                     }
                 }
                 if (item.isVideo) {
@@ -465,7 +579,7 @@ private fun ViewerOverlay(
                 // with a pending rect are keeping it or dropping it. Rotating
                 // underneath it would silently move the goalposts.
                 Text(
-                    "Drag on the photo, then save",
+                    "Drag corners or edges to resize, inside to move",
                     fontFamily = AppType.Sans,
                     fontSize = 11.sp,
                     color = Color.White.copy(alpha = 0.7f),
@@ -500,16 +614,28 @@ private fun ViewerOverlay(
                 ) {
                     ViewerAction(Icons.Filled.RotateRight, "Rotate") {
                         val src = edited ?: photo ?: return@ViewerAction
-                        edited?.recycle()
+                        // New bitmap FIRST, recycle after: src and the old edited
+                        // are the same object from the second tap on, so
+                        // recycling before transforming meant transforming a
+                        // dead bitmap - the every-second-tap crash.
+                        val old = edited
                         edited = Gallery.transform(src, rotateCw = true)
+                        old?.recycle()
                     }
                     ViewerAction(Icons.Filled.Flip, "Mirror") {
                         val src = edited ?: photo ?: return@ViewerAction
-                        edited?.recycle()
+                        val old = edited
                         edited = Gallery.transform(src, rotateCw = false)
+                        old?.recycle()
                     }
                     ViewerAction(Icons.Filled.Crop, "Crop") {
-                        if (photo != null) cropping = true
+                        // Every gallery app opens the crop window on the whole
+                        // photo: shrinking a full frame is one gesture, while
+                        // drawing the first box from nothing is two.
+                        if (photo != null || edited != null) {
+                            cropping = true
+                            cropUv = floatArrayOf(0f, 0f, 1f, 1f)
+                        }
                     }
                     ViewerAction(
                         Icons.Filled.Save,
