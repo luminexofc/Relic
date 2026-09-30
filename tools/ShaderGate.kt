@@ -1,7 +1,7 @@
-import com.retrocam.catalog.FilterCatalog
-import com.retrocam.catalog.FilterFamily
-import com.retrocam.catalog.FilterSpec
-import com.retrocam.catalog.Shaders
+import com.relic.catalog.FilterCatalog
+import com.relic.catalog.FilterFamily
+import com.relic.catalog.FilterSpec
+import com.relic.catalog.Shaders
 import java.io.File
 
 /**

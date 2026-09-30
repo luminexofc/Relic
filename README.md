@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="app/src/main/res/mipmap-xxhdpi/ic_launcher.png" width="88" alt="RetroCam icon">
-  <h1>RetroCam</h1>
+  <img src="app/src/main/res/mipmap-xxhdpi/ic_launcher.png" width="88" alt="Relic icon">
+  <h1>Relic</h1>
   <p><b>41 real-time retro filters for Android, every pixel computed by a GLSL fragment shader.</b><br>
   Not a static overlay — the whole frame is resampled, quantised and re-coloured on the GPU at preview framerate.</p>
 
@@ -92,7 +92,7 @@ The visual targets the shaders were tuned against:
 | `renderer` | `FilterRenderer`: `EGL10` offscreen context, program cache, `renderChain`, the fullscreen quad, the glyph ramp for ASCII, and the video encoder bridge. |
 | `camera` | CameraX controller — binding, front/back, torch, exposure range, rotation. |
 | `core/datastore` | `SettingsRepository`, every persisted key. |
-| `core/designsystem` | `RetroCamTheme`, the shadcn token set (`Tokens.kt`), the component set (`components/`) and motion tokens. |
+| `core/designsystem` | `RelicTheme`, the shadcn token set (`Tokens.kt`), the component set (`components/`) and motion tokens. |
 | `app` | Compose camera UI, filter drawer, settings, gallery, photo cards. |
 
 ### How a filter works
@@ -118,8 +118,8 @@ wrapped by the shared `Shaders.HEADER` (which supplies the source sampler, `u_pa
 Requirements: **JDK 17**, **Android SDK 35**, and either the bundled Gradle wrapper or a local Gradle 8.9.
 
 ```bash
-git clone https://github.com/luminexofc/RetroCam.git
-cd RetroCam
+git clone https://github.com/luminexofc/Relic.git
+cd Relic
 
 echo "sdk.dir=/path/to/Android/sdk" > local.properties   # or set ANDROID_HOME
 
@@ -133,7 +133,7 @@ A debug build is unsigned-by-Gradle for release purposes but installable with `a
 ## Project layout
 
 ```
-RetroCam/
+Relic/
 ├── app/                     Compose UI, settings, gallery
 ├── camera/                  CameraX controller
 ├── catalog/                 FilterSpec catalog + all GLSL (pure JVM)

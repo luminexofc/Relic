@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.retrocam.camera"
+    namespace = "com.relic.camera"
     compileSdk = 35
 
     defaultConfig {

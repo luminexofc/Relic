@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RetroCam verification gate.
+# Relic verification gate.
 #
 # Gradle cannot run here (AGP is not in the offline cache), so this drives the
 # parts that are actually checkable on this machine, all of them against the

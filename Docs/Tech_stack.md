@@ -1,4 +1,4 @@
-# Tech Stack.md — RetroCam
+# Tech Stack.md — Relic
 
 ## 1. Platform & Language
 

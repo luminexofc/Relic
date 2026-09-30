@@ -15,7 +15,7 @@ dependencyResolutionManagement {
         maven { url = uri("https://jitpack.io") }
     }
 }
-rootProject.name = "RetroCam"
+rootProject.name = "Relic"
 include(":app")
 include(":catalog")
 include(":renderer")

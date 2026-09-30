@@ -1,4 +1,4 @@
-# Architecture.md — RetroCam
+# Architecture.md — Relic
 
 ## 1. High-Level Pattern
 
@@ -109,7 +109,7 @@ Rule: **GL calls only on the GL thread.** ViewModel never touches GL; it pushes 
 | Favorites, recents order | DataStore Preferences (proto) |
 | Per-filter intensity memory | DataStore |
 | Settings (sound, grid, perf mode) | DataStore |
-| Photos | Device MediaStore (app-owned folder `Pictures/RetroCam/`) |
+| Photos | Device MediaStore (app-owned folder `Pictures/Relic/`) |
 
 No account needed. Optional Phase 3: Appwrite sync of favorites/settings via your existing backend.
 

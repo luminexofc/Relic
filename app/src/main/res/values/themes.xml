@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.RetroCam" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Relic" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">#FF0A0A0F</item>
         <item name="android:statusBarColor">#00000000</item>
         <item name="android:navigationBarColor">#FF0A0A0F</item>

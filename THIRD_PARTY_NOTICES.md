@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-RetroCam builds on, and derives filter mathematics from, the projects below.
+Relic builds on, and derives filter mathematics from, the projects below.
 
 ---
 
@@ -11,19 +11,19 @@ RetroCam builds on, and derives filter mathematics from, the projects below.
 - **License:** Apache License, Version 2.0
 - **Copyright:** Copyright 2019 - 2026 Himshikhar Gayan
 
-RetroCam depends on `com.github.hgayan7:FilterLibrary:2.0.0` (via JitPack) and
+Relic depends on `com.github.hgayan7:FilterLibrary:2.0.0` (via JitPack) and
 ports filter mathematics from it into GLSL. The ported code retains this
 attribution, and the files it touches say so at the top.
 
 Specifically derived from that project:
 
-| RetroCam file | Derived from |
+| Relic file | Derived from |
 |---|---|
 | `catalog/…/lab/LabGrading.kt` | `FilterEngine.applyAdjustments`, `FilterEngine.getColorMatrixForFilter` |
 | `catalog/…/lab/LabTemplates.kt` | the 48 `FilterType` presets and their 4x5 color matrices |
 | `catalog/…/lab/LabShader.kt` (GLSL) | `FilterEngine.applyDuotone`, `applyVignette`, `applyFilmGrain`, `applySharpen`, `applyRgbGlitch`, `applyHaldLut` |
 
-What was **not** taken: the `Bitmap`/`Canvas` rendering implementations. RetroCam
+What was **not** taken: the `Bitmap`/`Canvas` rendering implementations. Relic
 runs its filter chain on the GPU through an offscreen `EGL10` context, so the
 per-pixel work was reimplemented as a GLSL fragment shader rather than ported
 line-for-line. The observable behaviour is intended to match, and
@@ -75,6 +75,6 @@ this notice is what recorded that.
 
 ---
 
-## RetroCam itself
+## Relic itself
 
-RetroCam has no license file of its own yet. All rights reserved by default.
+Relic has no license file of its own yet. All rights reserved by default.

@@ -1,4 +1,4 @@
-# PRD — RetroCam (Working Title)
+# PRD — Relic (Working Title)
 
 > A retro/procedural-filter camera app for Android. Every filter is real-time, GPU-accelerated, and shippable phase by phase.
 

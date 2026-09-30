@@ -7,10 +7,10 @@
 
     <application
         android:name=".app.MyApp"
-        android:label="RetroCam"
+        android:label="Relic"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android:theme="@style/Theme.RetroCam"
+        android:theme="@style/Theme.Relic"
         android:allowBackup="false">
         <activity
             android:name=".app.MainActivity"
@@ -23,7 +23,7 @@
         </activity>
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="com.retrocam.fileprovider"
+            android:authorities="com.relic.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data

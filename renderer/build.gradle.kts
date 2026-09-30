@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.retrocam.renderer"
+    namespace = "com.relic.renderer"
     compileSdk = 35
 
     defaultConfig {

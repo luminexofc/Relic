@@ -1,0 +1,864 @@
+package com.relic.catalog.lab
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class XmpImportTest {
+
+    /**
+     * org.junit.Assert's assertNotNull returns Unit, so there is no way to get
+     * the value back out of it. This asserts and returns in one step, rather
+     * than repeating `!!` at every call site.
+     */
+    private fun <T : Any> nn(v: T?): T {
+        assertNotNull(v)
+        return v!!
+    }
+
+    /** A real Lightroom 11 preset, trimmed but structurally identical. */
+    private val modern = """
+        <?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+         <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+          <rdf:Description rdf:about=""
+            xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+            xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+            crs:Version="15.0"
+            crs:ProcessVersion="11.0"
+            crs:HasSettings="True"
+            crs:Contrast2012="+10"
+            crs:Exposure2012="+0.35"
+            crs:Highlights2012="-42"
+            crs:Shadows2012="+24"
+            crs:Whites2012="+8"
+            crs:Blacks2012="-11"
+            crs:Texture="+15"
+            crs:Clarity="+5"
+            crs:Dehaze="+3"
+            crs:Vibrance="+20"
+            crs:Saturation="-5"
+            crs:Sharpness="45"
+            crs:SharpnessRadius="1.20"
+            crs:Detail="25"
+            crs:Masking="40"
+            crs:ColorTemp="5200"
+            crs:Tint="+6"
+            crs:Look="Medium High Contrast"
+            crs:ToneCurvePV2012="0, 0, 255, 255, 128, 132, 64, 96, 192, 208"
+            crs:GrainAmount="18"
+            crs:GrainSize="60"
+            crs:GrainRoughness="70"
+            crs:PostCropVignetteAmount="-22"
+            crs:PostCropVignetteMidpoint="65"
+            crs:PostCropVignetteFeather="75"
+            crs:PostCropVignetteRoundness="+12"
+            crs:PostCropVignetteAspect="+8"
+          />
+         </rdf:RDF>
+        </x:xmpmeta>
+    """.trimIndent()
+
+    // ---- reading ----
+
+    @Test
+    fun `reads every crs attribute across lines`() {
+        val a = XmpImport.readAttributes(modern)
+        assertEquals("+10", a["Contrast2012"])
+        assertEquals("+0.35", a["Exposure2012"])
+        assertEquals("Medium High Contrast", a["Look"])
+    }
+
+    @Test
+    fun `a tone curve with spaces and commas survives`() {
+        // The commas here would break a naive split, which is the whole reason
+        // the scanner reads attributes rather than fields.
+        val a = XmpImport.readAttributes(modern)
+        assertTrue(a.getValue("ToneCurvePV2012").contains(','))
+        assertEquals(10, a.getValue("ToneCurvePV2012").split(',').size)
+    }
+
+    @Test
+    fun `non-crs attributes are ignored`() {
+        val a = XmpImport.readAttributes("""xmp:Creator="me" crs:Contrast2012="+5"""")
+        assertEquals(1, a.size)
+        assertEquals("+5", a["Contrast2012"])
+    }
+
+    @Test
+    fun `a file with no crs attributes reads as empty rather than throwing`() {
+        assertTrue(XmpImport.readAttributes("<html></html>").isEmpty())
+        assertTrue(XmpImport.parse("<html></html>").isEmpty)
+    }
+
+    // ---- mapping ----
+
+    @Test
+    fun `contrast and saturation land on their own knobs`() {
+        val r = XmpImport.parse(modern).recipe.adjustments
+        assertEquals(1.1f, r.contrast, 1e-3f)
+        // Saturation and Vibrance are separate controls now: saturation stands
+        // alone, vibrance rides alongside it.
+        assertEquals(0.95f, r.saturation, 1e-3f)
+    }
+
+    @Test
+    fun `exposure becomes gamma rather than brightness`() {
+        val rec = XmpImport.parse(modern).recipe
+        // +0.35 EV: 2^0.35 = 1.2746
+        assertEquals(1.2746f, rec.gamma, 1e-3f)
+        // brightness must stay neutral, because it is an additive offset and an
+        // exposure is multiplicative: moving it would drag blacks.
+        assertEquals(0f, rec.adjustments.brightness, 0f)
+    }
+
+    @Test
+    fun `a negative exposure darkens via gamma`() {
+        val rec = XmpImport.parse("""crs:Exposure2012="-1.0"""").recipe
+        assertEquals(0.5f, rec.gamma, 1e-3f)
+    }
+
+    @Test
+    fun `sharpness becomes the sharpen effect`() {
+        assertEquals(0.45f, XmpImport.parse(modern).recipe.sharpen, 1e-4f)
+    }
+
+    @Test
+    fun `a cooler colour temp gives negative warmth and 5500 is neutral`() {
+        assertTrue(XmpImport.parse(modern).recipe.adjustments.warmth < 0f)
+        assertEquals(0f, XmpImport.parse("""crs:ColorTemp="5500"""").recipe.adjustments.warmth, 1e-4f)
+        assertTrue(XmpImport.parse("""crs:ColorTemp="9000"""").recipe.adjustments.warmth > 0f)
+    }
+
+    @Test
+    fun `tint maps straight across because both are minus one to one`() {
+        assertEquals(0.06f, XmpImport.parse(modern).recipe.adjustments.tint, 1e-4f)
+    }
+
+    // ---- process version routing ----
+
+    @Test
+    fun `a process 2 preset uses the legacy contrast scale about 128`() {
+        val r = XmpImport.parse("""crs:ProcessVersion="2.6" crs:Contrast="138"""").recipe
+        assertEquals(1.1f, r.adjustments.contrast, 1e-3f)
+    }
+
+    @Test
+    fun `a legacy contrast of 128 is neutral`() {
+        val r = XmpImport.parse("""crs:ProcessVersion="2.6" crs:Contrast="128"""").recipe
+        assertEquals(1f, r.adjustments.contrast, 1e-4f)
+    }
+
+    /**
+     * The *2012 key names arrived with Process Version 3 (Lightroom 4) and every
+     * version since still writes them, so a preset tagged 5.0 is modern. Only 1.x
+     * and 2.x are legacy.
+     *
+     * The SCALE belongs to the key, not to ProcessVersion. `Contrast` is 0-255
+     * about 128 and `Contrast2012` is -100..100, so a file carrying the
+     * unprefixed key is read on the legacy scale whichever version it claims.
+     * The old reader inferred the scale from ProcessVersion and consequently
+     * threw away a perfectly good legacy contrast value from any file that
+     * mentioned a modern process version.
+     */
+    @Test
+    fun `the scale comes from the key name, not from ProcessVersion`() {
+        for (v in listOf("3.0", "5.0", "6.6", "11.0", "15.0")) {
+            val legacy = XmpImport.parse("""crs:ProcessVersion="$v" crs:Contrast="138"""").recipe
+            assertEquals("PV $v legacy scale", 1.1f, legacy.adjustments.contrast, 1e-3f)
+            val modern = XmpImport.parse("""crs:ProcessVersion="$v" crs:Contrast2012="+10"""").recipe
+            assertEquals("PV $v 2012 scale", 1.1f, modern.adjustments.contrast, 1e-3f)
+        }
+    }
+
+    @Test
+    fun `the 2012 keys win when a file somehow carries both families`() {
+        val x = """crs:Contrast="200" crs:Contrast2012="+10""""
+        assertEquals(1.1f, XmpImport.parse(x).recipe.adjustments.contrast, 1e-3f)
+    }
+
+    /**
+     * The two failure modes that would be invisible if they only showed up on a
+     * device: values run past their knob range, and a hostile file making the
+     * renderer build a chain of nine passes.
+     */
+    @Test
+    fun `absurd values are clamped into the knob ranges`() {
+        val r = XmpImport.parse(
+            """crs:Exposure2012="+9" crs:Contrast2012="+9000" crs:Saturation="+9000" """ +
+                """crs:ColorTemp="200000" crs:Tint="+900" crs:Sharpness="5000"""",
+        ).recipe
+        assertTrue(r.gamma in 0.2f..3f)
+        assertTrue(r.adjustments.contrast in 0f..3f)
+        assertTrue(r.adjustments.saturation in 0f..3f)
+        assertTrue(r.adjustments.warmth in -1f..1f)
+        assertTrue(r.adjustments.tint in -1f..1f)
+        assertTrue(r.sharpen in 0f..1f)
+    }
+
+    @Test
+    fun `an imported recipe is a usable recipe`() {
+        val rec = XmpImport.parse(modern).recipe
+        assertTrue(!rec.isIdentity)
+        // No stages, so the chain stays at the grade alone.
+        assertTrue(rec.stages.isEmpty())
+    }
+
+    // ---- honest reporting ----
+
+    @Test
+    fun `the report names every key that was mapped`() {
+        val res = XmpImport.parse(modern)
+        val keys = res.applied.map { it.key }.toSet()
+        assertTrue(
+            "missing keys: " + (setOf("Exposure2012", "Contrast2012", "Saturation", "Vibrance", "Sharpness", "ColorTemp", "Tint") - keys),
+            keys.containsAll(setOf("Exposure2012", "Contrast2012", "Saturation", "Vibrance", "Sharpness", "ColorTemp", "Tint")),
+        )
+    }
+
+    @Test
+    fun `approximate mappings are flagged as such`() {
+        val res = XmpImport.parse(modern)
+        val approx = res.applied.filter { it.approx }.map { it.key }.toSet()
+        // Exposure and ColorTemp are the lossy ones (stops->gamma, Kelvin->opinion).
+        assertTrue(approx.contains("Exposure2012"))
+        assertTrue(approx.contains("ColorTemp"))
+        // Vibrance is exact now: it has its own control rather than folding
+        // into saturation.
+        assertTrue(!res.applied.first { it.key == "Vibrance" }.approx)
+        // These are exact, so claiming otherwise would be its own kind of lie.
+        assertTrue(!res.applied.first { it.key == "Contrast2012" }.approx)
+        assertTrue(!res.applied.first { it.key == "Tint" }.approx)
+    }
+
+    @Test
+    fun `the keys with no Lab equivalent are reported, not vanished`() {
+        val res = XmpImport.parse(modern)
+        val dropped = res.ignored.map { it.key }.toSet()
+        // The only key with no Lab equivalent left in this fixture is Adobe's
+        // proprietary curve set. The vignette shape parameters are real controls
+        // now, and ToneCurveName is metadata, deliberately absent rather than
+        // listed as dropped.
+        assertTrue("Look was dropped without being reported", "Look" in dropped)
+        for (k in listOf("PostCropVignetteRoundness", "PostCropVignetteAspect")) {
+            assertTrue("$k should be applied now, not dropped", res.applied.any { it.key == k })
+        }
+        assertTrue(
+            "GrainAmount should be applied now, not dropped",
+            res.applied.any { it.key == "GrainAmount" },
+        )
+        assertTrue("the report should still name the keys it did handle",
+            res.applied.map { it.key }.containsAll(
+                listOf("Texture", "Clarity", "Dehaze", "Highlights2012", "Shadows2012")))
+        // Every drop has to say why, or the report is just a list of absences.
+        assertTrue(res.ignored.all { it.reason.orEmpty().isNotBlank() })
+    }
+
+    /** Local contrast used to be reported as having no analogue. */
+    @Test
+    fun `texture clarity and dehaze are applied not dropped`() {
+        val r = XmpImport.parse(modern).recipe
+        assertEquals(15 / 100f, r.texture, 1e-3f)
+        assertEquals(5 / 100f, r.clarity, 1e-3f)
+        assertEquals(3 / 100f, r.dehaze, 1e-3f)
+        assertTrue(r.localActive)
+        val res = XmpImport.parse(modern)
+        for (k in listOf("Texture", "Clarity", "Dehaze")) {
+            assertTrue("$k should be applied", res.applied.any { it.key == k })
+            assertTrue("$k should not be dropped", res.ignored.none { it.key == k })
+        }
+    }
+
+    @Test
+    fun `local contrast values are clamped`() {
+        val r = XmpImport.parse("""crs:Texture="+9000" crs:Clarity="-9000"""").recipe
+        assertTrue(r.texture in -1f..1f)
+        assertTrue(r.clarity in -1f..1f)
+    }
+
+    /** The four range controls used to be the biggest thing we threw away. */
+    @Test
+    fun `highlights shadows whites and blacks are applied not dropped`() {
+        val res = XmpImport.parse(modern)
+        val r = res.recipe
+        assertEquals(-42 / 100f, r.highlights, 1e-3f)
+        assertEquals(24 / 100f, r.shadows, 1e-3f)
+        assertEquals(8 / 100f, r.whites, 1e-3f)
+        assertEquals(-11 / 100f, r.blacks, 1e-3f)
+        assertTrue(r.rangesActive)
+        for (k in listOf("Highlights2012", "Shadows2012", "Whites2012", "Blacks2012")) {
+            assertTrue("$k should be applied", res.applied.any { it.key == k })
+            assertTrue("$k should not be in the dropped list", res.ignored.none { it.key == k })
+        }
+    }
+
+    @Test
+    fun `range values are clamped rather than allowed to run away`() {
+        val r = XmpImport.parse("""crs:Highlights2012="+9000" crs:Shadows2012="-9000"""").recipe
+        assertTrue(r.highlights in -1f..1f)
+        assertTrue(r.shadows in -1f..1f)
+    }
+
+    @Test
+    fun `look is still dropped and says why`() {
+        val res = XmpImport.parse(modern)
+        val look = res.ignored.first { it.key == "Look" }
+        assertTrue(look.reason.orEmpty().contains("no honest mapping"))
+    }
+
+    /** The tone curve is the biggest thing a preset carries, so it must land. */
+    @Test
+    fun `the tone curve is imported rather than dropped`() {
+        val res = XmpImport.parse(modern)
+        assertTrue(res.recipe.toneCurveActive)
+        assertTrue(res.applied.any { it.key == "ToneCurvePV2012" })
+        assertTrue(res.ignored.none { it.key == "ToneCurvePV2012" })
+        val g = ToneCurve.parseGroup(res.recipe.toneCurves)
+        assertNotNull(g[0])
+        // 128,132: a lift of the midtones.
+        assertEquals(132 / 255f, g[0]!![128], 1e-3f)
+    }
+
+    @Test
+    fun `per-channel curves land in their own slots`() {
+        val res = XmpImport.parse(
+            "crs:ToneCurvePV2012Red=\"0, 0, 255, 255, 128, 200\" " +
+                "crs:ToneCurvePV2012Blue=\"0, 0, 255, 255, 128, 60\"",
+        )
+        val g = ToneCurve.parseGroup(res.recipe.toneCurves)
+        assertNull(g[0]); assertNotNull(g[1]); assertNull(g[2]); assertNotNull(g[3])
+        assertEquals(200 / 255f, g[1]!![128], 1e-3f)
+        assertEquals(60 / 255f, g[3]!![128], 1e-3f)
+    }
+
+    @Test
+    fun `an unreadable curve is reported as unreadable, not as identity`() {
+        val res = XmpImport.parse("""crs:ToneCurvePV2012="nonsense"""")
+        assertTrue(!res.recipe.toneCurveActive)
+        assertTrue(res.ignored.any { it.key == "ToneCurvePV2012" && it.reason.orEmpty().contains("unreadable") })
+    }
+
+    // ---- Color Mixer, grayscale, old split toning ----
+
+    /**
+     * The 24 HSL keys were the largest block of "no Lab equivalent" in a real
+     * preset, and they are plain -100..100 remaps, so all 24 are exact.
+     */
+    @Test
+    fun `the color mixer is imported not dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:HueAdjustmentGreen="+20" crs:SaturationAdjustmentGreen="-40"
+            crs:LuminanceAdjustmentGreen="+15" crs:HueAdjustmentBlue="+10"
+            crs:SaturationAdjustmentBlue="+30" crs:LuminanceAdjustmentBlue="-25"
+            """.trimIndent(),
+        )
+        assertEquals(0, res.ignored.size)
+        val v: FloatArray = nn(res.recipe.hslArray())
+        assertEquals(0.2f, v[Hsl.hueAt(3)], 1e-3f)
+        assertEquals(-0.4f, v[Hsl.satAt(3)], 1e-3f)
+        assertEquals(0.15f, v[Hsl.lumAt(3)], 1e-3f)
+        assertEquals(0.1f, v[Hsl.hueAt(5)], 1e-3f)
+        assertEquals(0.3f, v[Hsl.satAt(5)], 1e-3f)
+        assertEquals(-0.25f, v[Hsl.lumAt(5)], 1e-3f)
+        // And untouched bands stay neutral.
+        assertEquals(0f, v[Hsl.hueAt(0)], 1e-3f)
+        assertTrue(res.recipe.hslActive)
+    }
+
+    @Test
+    fun `color mixer values are clamped`() {
+        val res = XmpImport.parse(
+            """crs:HueAdjustmentRed="+9000" crs:SaturationAdjustmentBlue="-9000"""",
+        )
+        val v: FloatArray = nn(res.recipe.hslArray())
+        assertEquals(1f, v[Hsl.hueAt(0)], 1e-3f)
+        assertEquals(-1f, v[Hsl.satAt(5)], 1e-3f)
+    }
+
+    @Test
+    fun `a zeroed color mixer key is honoured and leaves the mixer off`() {
+        val res = XmpImport.parse(
+            """crs:HueAdjustmentRed="0" crs:SaturationAdjustmentRed="0"""",
+        )
+        assertEquals("neither key is unsupported", 0, res.ignored.size)
+        // Both are reported, as honoured neutrals.
+        assertEquals(2, res.exact.size)
+        assertFalse(res.recipe.hslActive)
+        assertEquals(Hsl.NONE, res.recipe.hsl)
+    }
+
+    @Test
+    fun `a preset with no color mixer leaves it off`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
+        assertFalse(r.hslActive)
+        assertNull(r.hslArray())
+    }
+
+    /**
+     * The six calibration keys, which is the one place a matrix is genuinely
+     * the right answer: a calibration moves one primary without disturbing the
+     * others, and a diagonal scale cannot say that.
+     */
+    @Test
+    fun `calibration is imported not dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:RedHue="+10" crs:RedSaturation="+20"
+            crs:GreenHue="-5" crs:GreenSaturation="+15"
+            crs:BlueHue="+5" crs:BlueSaturation="-10"
+            """.trimIndent(),
+        )
+        assertEquals(0, res.ignored.size)
+        val (h, s) = nn(res.recipe.calibrationParts())
+        assertEquals(0.1f, h[0], 1e-3f)
+        assertEquals(0.2f, s[0], 1e-3f)
+        assertEquals(-0.05f, h[1], 1e-3f)
+        assertEquals(0.15f, s[1], 1e-3f)
+        assertEquals(0.05f, h[2], 1e-3f)
+        assertEquals(-0.1f, s[2], 1e-3f)
+        assertTrue(res.recipe.calibrationActive)
+        assertNotNull(res.recipe.calibrationMatrix())
+    }
+
+    @Test
+    fun `a neutral calibration leaves the matrix off`() {
+        val r = XmpImport.parse("""crs:RedHue="0" crs:RedSaturation="0"""").recipe
+        assertFalse(r.calibrationActive)
+        assertEquals(Calibration.NONE, r.calibration)
+        assertNull(r.calibrationMatrix())
+    }
+
+    @Test
+    fun `calibration values are clamped`() {
+        val (h, s) = nn(
+            XmpImport.parse(
+                """crs:RedHue="+9000" crs:RedSaturation="-9000" crs:BlueHue="+9000"""",
+            ).recipe.calibrationParts(),
+        )
+        for (v in h) assertTrue("hue $v out of range", v in -1f..1f)
+        for (v in s) assertTrue("sat $v out of range", v in -1f..1f)
+    }
+
+    /**
+     * A file can carry two spellings of one setting. We apply one of them, and
+     * the other must be reported as honoured rather than as unimplemented -
+     * which is precisely what happened: a preset with both `VignetteAmount` and
+     * `PostCropVignetteAmount` reported one of them as having no Lab
+     * equivalent, while the identical setting under the other name worked.
+     */
+    @Test
+    fun `a losing duplicate spelling is honoured not reported as unimplemented`() {
+        val res = XmpImport.parse(
+            """crs:VignetteAmount="-22" crs:PostCropVignetteAmount="-22"""",
+        )
+        // Neither spelling is a failure: one was applied, the other is the same
+        // setting under a name we do not use, and the file told us both.
+        assertEquals("no spelling should be reported as unimplemented", 0, res.ignored.size)
+        // Both are accounted for, so coverage stays 100 rather than counting one
+        // of them as a miss.
+        assertEquals(2, res.applied.size)
+        assertEquals(100, res.coveragePercent)
+        // And the vignette is applied once, not twice.
+        assertEquals(0.22f, res.recipe.vignette, 1e-3f)
+    }
+
+    @Test
+    fun `grayscale is imported and clamped`() {
+        val on = XmpImport.parse("""crs:ConvertToGrayscale="True"""").recipe
+        assertEquals(1f, on.grayscale, 1e-4f)
+        // Explicitly off is honoured, not reported as a failure.
+        val off = XmpImport.parse("""crs:ConvertToGrayscale="False"""")
+        assertEquals(0, off.ignored.size)
+        assertEquals(0f, off.recipe.grayscale, 0f)
+        // The old continuous form still works.
+        val mix = XmpImport.parse("""crs:GrayscaleMix="60"""").recipe
+        assertEquals(0.6f, mix.grayscale, 1e-3f)
+    }
+
+    @Test
+    fun `old split toning drives the existing tints`() {
+        val r = XmpImport.parse(
+            """
+            crs:SplitToningShadowHue="+220" crs:SplitToningShadowSaturation="+40"
+            crs:SplitToningHighlightHue="+50" crs:SplitToningHighlightSaturation="+60"
+            crs:SplitToningBalance="+75"
+            """.trimIndent(),
+        ).recipe
+        assertTrue("balance should drive the split amount", r.splitAmount > 0f)
+        // A saturation of 40 out of 100 is a visible colour, not a neutral grey.
+        val shadow = unpackRgb(r.shadowTint)
+        assertTrue(
+            "shadow tint should be a colour, was $shadow",
+            shadow.any { it > 0.2f },
+        )
+        val highlight = unpackRgb(r.highlightTint)
+        assertTrue(
+            "highlight tint should be a colour, was $highlight",
+            highlight.any { it > 0.2f },
+        )
+    }
+
+    /** A preset that sets no tone curve leaves the recipe inactive. */
+    /**
+     * A parametric preset carries no ToneCurvePV2012 at all, so before this it
+     * imported as a straight line: the entire intent of the preset, gone.
+     */
+    @Test
+    fun `a parametric curve is reconstructed rather than dropped`() {
+        val res = XmpImport.parse(
+            """
+            crs:ParametricShadows="+20" crs:ParametricDarks="+10"
+            crs:ParametricLights="-15" crs:ParametricHighlights="+30"
+            crs:ParametricShadowSplit="25" crs:ParametricMidtoneSplit="50"
+            crs:ParametricHighlightSplit="75"
+            """.trimIndent(),
+        )
+        assertEquals("no parametric key should be unimplemented", 0, res.ignored.size)
+        assertTrue(res.recipe.toneCurveActive)
+        val g = nn(ToneCurve.parseGroup(res.recipe.toneCurves))
+        // It lands in the composite run, which is the one the shader samples
+        // first, so it needs no new texture and no new fetch.
+        assertNotNull(g[0])
+        assertNull(g[1])
+        // All seven are approximate: this is a reconstruction of Adobe's curve
+        // from its published amounts, not a reversal of it.
+        assertEquals(7, res.approximate.size)
+    }
+
+    /** Lifting the shadows must lift the dark end and leave white alone. */
+    @Test
+    fun `a shadow lift raises the dark end and pins white`() {
+        val c = nn(ToneCurve.foldParametric(20f, 0f, 0f, 0f, 50f, 50f, 50f))
+        assertTrue("blacks should be lifted", c[10] > 10 / 255f)
+        assertEquals(1f, c[255], 1e-3f)
+    }
+
+    /** Pulling the highlights down must lower the bright end and pin black. */
+    @Test
+    fun `a highlight pull lowers the bright end and pins black`() {
+        val c = nn(ToneCurve.foldParametric(0f, 0f, 0f, -30f, 50f, 50f, 50f))
+        assertEquals(0f, c[0], 1e-3f)
+        assertTrue("whites should be pulled down", c[245] < 245 / 255f)
+    }
+
+    /**
+     * The four ranges must tile the tonal scale, not stack at mid-grey.
+     *
+     * A symmetric-bell implementation of the same idea produces a curve that
+     * rises and falls four times; this one is monotone per range, which is what
+     * a real tone curve is.
+     */
+    @Test
+    fun `the four ranges do not all peak at midtone`() {
+        val c = nn(ToneCurve.foldParametric(40f, 40f, 40f, 40f, 20f, 50f, 80f))
+        // Compare the lift in the shadows against the lift in the highlights: if
+        // all four ranges peaked together these would be equal.
+        val shadowLift = c[30] - 30 / 255f
+        val highlightLift = c[225] - 225 / 255f
+        assertTrue(
+            "shadow lift $shadowLift and highlight lift $highlightLift look like the same range",
+            kotlin.math.abs(shadowLift - highlightLift) > 0.02f,
+        )
+    }
+
+    @Test
+    fun `no amounts means no curve`() {
+        assertNull(ToneCurve.foldParametric(0f, 0f, 0f, 0f, 25f, 50f, 75f))
+    }
+
+    /**
+     * Adobe's ShadowTint is a signed green/magenta shift on the shadows, which
+     * is what the Lab's split tone already is. It maps onto the existing
+     * `shadowTint` rather than needing a control of its own.
+     */
+    @Test
+    fun `shadow tint maps onto the existing split tone`() {
+        val green = XmpImport.parse("""crs:ShadowTint="+60"""").recipe
+        assertTrue("a shadow tint should switch the split on", green.splitAmount > 0f)
+        val g = unpackRgb(green.shadowTint)
+        assertTrue("positive should be green: ${g.toList()}", g[1] > g[0] && g[1] > g[2])
+
+        val magenta = XmpImport.parse("""crs:ShadowTint="-60"""").recipe
+        val m = unpackRgb(magenta.shadowTint)
+        assertTrue("negative should be magenta: ${m.toList()}", m[0] > m[1] && m[2] > m[1])
+    }
+
+    @Test
+    fun `a zero shadow tint is honoured and leaves the split alone`() {
+        val res = XmpImport.parse("""crs:ShadowTint="0"""")
+        assertEquals(0, res.ignored.size)
+        assertEquals(0f, res.recipe.splitAmount, 0f)
+    }
+
+    /** A hand-edited file with the splits out of order must not invert. */
+    @Test
+    fun `splits out of order still give a sane curve`() {
+        val c = nn(ToneCurve.foldParametric(20f, 20f, 20f, 20f, 90f, 10f, 50f))
+        for (i in 1 until ToneCurve.SIZE) {
+            assertTrue("curve went backwards at $i", c[i] >= c[i - 1] - 1e-3f)
+        }
+    }
+
+    /** The seven keys need no new shader work at all. */
+    @Test
+    fun `the parametric fold needs no new texture`() {
+        // It goes into the composite channel of a texture the shader already
+        // samples, so this is a guard against someone adding a second curve
+        // texture when they extend this.
+        assertTrue("the curve sampler changed", com.relic.catalog.Shaders.LAB_GRADE.contains("u_curve"))
+        assertEquals(1, Regex("sampler2D u_curve").findAll(com.relic.catalog.Shaders.HEADER).count())
+    }
+
+    /** A preset with no curve leaves the recipe inactive. */
+    @Test
+    fun `a preset with no curve leaves the recipe inactive`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
+        assertTrue(!r.toneCurveActive)
+        assertEquals(ToneCurve.NONE, r.toneCurves)
+    }
+
+    /** Nonsense in one curve must not take the rest of the import with it. */
+    @Test
+    fun `one bad curve does not discard the rest of the preset`() {
+        val res = XmpImport.parse("""crs:ToneCurvePV2012Red="junk" crs:Contrast2012="+10"""")
+        assertEquals(1.1f, res.recipe.adjustments.contrast, 1e-3f)
+        assertTrue(res.applied.any { it.key == "Contrast2012" })
+    }
+
+    @Test
+    fun `unrecognised keys still appear in the report`() {
+        val res = XmpImport.parse("""crs:Contrast2012="+5" crs:SomeFutureSetting="+9"""")
+        assertNotNull(res.ignored.firstOrNull { it.key == "SomeFutureSetting" })
+    }
+
+    @Test
+    fun `metadata is not reported as a dropped look setting`() {
+        val res = XmpImport.parse(modern)
+        assertNull(res.ignored.firstOrNull { it.key == "ProcessVersion" })
+        assertNull(res.ignored.firstOrNull { it.key == "HasSettings" })
+    }
+
+    // ---- renamed keys ----
+
+    /**
+     * Adobe renamed several settings between Process Versions, and the reader
+     * only knew the new names. A preset using the old names therefore lost all
+     * three of its sharpening parameters, its clarity and its grain
+     * distribution while reporting every one of them as "no Lab equivalent" -
+     * which is the exact opposite of true and the reason a real preset read as
+     * 9% covered.
+     */
+    @Test
+    fun `the old key names are read, not treated as unknown`() {
+        val res = XmpImport.parse(
+            """
+            crs:Clarity2012="+8" crs:SharpenRadius="0.8" crs:SharpenDetail="25"
+            crs:SharpenEdgeMasking="40" crs:GrainFrequency="40" crs:VignetteAmount="-22"
+            crs:Exposure="+0.5" crs:Contrast="128" crs:Temperature="9000"
+            """.trimIndent(),
+        )
+        assertEquals("no key should be reported as unknown", 0, res.ignored.size)
+        val r = res.recipe
+        assertEquals(0.08f, r.clarity, 1e-3f)
+        assertEquals(0.8f, r.sharpRadius, 1e-3f)
+        assertEquals(0.25f, r.detail, 1e-3f)
+        assertEquals(0.4f, r.masking, 1e-3f)
+        assertEquals(0.4f, r.grainRough, 1e-3f)
+        assertEquals(0.22f, r.vignette, 1e-3f)
+        // Exposure +0.5 EV: gamma = 2^0.5
+        assertEquals(1.4142f, r.gamma, 1e-3f)
+        // Contrast 128 is exactly neutral on the legacy scale.
+        assertEquals(1f, r.adjustments.contrast, 1e-4f)
+        assertTrue(r.adjustments.warmth > 0f)
+    }
+
+    /** The report has to name the key the file used, not the one we wished for. */
+    @Test
+    fun `the report names the key the file actually used`() {
+        val res = XmpImport.parse("""crs:SharpenEdgeMasking="40"""")
+        assertTrue(res.applied.any { it.key == "SharpenEdgeMasking" })
+        assertTrue(res.applied.none { it.key == "Masking" })
+    }
+
+    /** Both families present: the 2012 key wins, which is what Adobe means. */
+    @Test
+    fun `the newer name wins when a file carries both`() {
+        val res = XmpImport.parse("""crs:Clarity="+5" crs:Clarity2012="+40"""")
+        assertEquals(0.4f, res.recipe.clarity, 1e-3f)
+        assertTrue(res.applied.any { it.key == "Clarity2012" })
+    }
+
+    /**
+     * Two parses in a row must not share state. An earlier version kept its
+     * accumulators on the object, so a preset that set no gamma would inherit
+     * the last preset's gamma and look like it had been applied.
+     */
+    @Test
+    fun `successive parses do not leak into each other`() {
+        XmpImport.parse(modern)
+        val fresh = XmpImport.parse("""crs:Contrast2012="+10"""").recipe
+        assertEquals(1f, fresh.gamma, 1e-4f)
+        assertEquals(0f, fresh.sharpen, 0f)
+        assertEquals(0f, fresh.adjustments.warmth, 0f)
+        assertEquals(1f, fresh.adjustments.saturation, 1e-4f)
+    }
+
+    @Test
+    fun `a preset of all zeroes imports as an identity recipe`() {
+        val r = XmpImport.parse(
+            """crs:Contrast2012="0" crs:Exposure2012="0" crs:Saturation="0" crs:Tint="0" """,
+        ).recipe
+        assertTrue(r.isIdentity)
+    }
+
+    // ---- coverage ----
+
+    /**
+     * A percentage is only useful if it is not always 100 and not always 0, so
+     * these pin both ends and the arithmetic between them.
+     *
+     * The denominator is the look settings, NOT every attribute in the file. A
+     * preset reporting 9% while reproducing nearly all of its actual settings
+     * was measuring how verbose XMP is, not how good the import is.
+     */
+    @Test
+    fun `coverage counts look keys, not visual weight, and says so`() {
+        val res = XmpImport.parse(modern)
+        val expected = res.applied.size * 100 / res.lookKeys.size
+        assertEquals(expected, res.coveragePercent)
+        assertTrue("coverage should be partial for a real preset", res.coveragePercent in 1..99)
+        assertEquals(res.exact.size * 100 / res.lookKeys.size, res.exactPercent)
+        assertTrue("exact should not exceed total", res.exactPercent <= res.coveragePercent)
+    }
+
+    /**
+     * The headline number has to be about the picture. Every key a preset sets
+     * to zero is honoured, and a capability flag is not scored as a failure, so
+     * a preset whose look settings we all handle reports full coverage even
+     * though its file lists a hundred attributes.
+     */
+    @Test
+    fun `a real preset is not scored on the keys that are not a look`() {
+        val res = XmpImport.parse(
+            """
+            crs:Contrast2012="+12" crs:Exposure2012="+0.25" crs:Highlights2012="-40"
+            crs:Shadows2012="+38" crs:Whites2012="-20" crs:Blacks2012="+10"
+            crs:Saturation="-2" crs:Vibrance="+10" crs:Clarity2012="+8"
+            crs:GrainAmount="6" crs:GrainSize="11" crs:GrainFrequency="40"
+            crs:SharpenRadius="0.8" crs:SharpenDetail="25" crs:SharpenEdgeMasking="40"
+            crs:ProcessVersion="11.0" crs:PresetType="Normal"
+            crs:SupportsColor="True" crs:SupportsMonochrome="False"
+            crs:Copyright="Someone" crs:ContactInfo="x" crs:Version="15.0"
+            crs:CameraModelRestriction="all" crs:AutoLateralCA="True"
+            crs:PerspectiveVertical="12" crs:LensProfileEnable="False"
+            crs:LensProfileSetup="0" crs:CameraProfile="Adobe Standard"
+            crs:HasSettings="True" crs:Name="my preset"
+            """.trimIndent(),
+        )
+        // Optics and geometry are real controls now, so AutoLateralCA,
+        // PerspectiveVertical and LensProfileEnable are look settings and
+        // applied. The rest is still out of the denominator.
+        assertEquals(0, res.ignored.size)
+        assertEquals(100, res.coveragePercent)
+        assertTrue(res.metadata.isNotEmpty())
+        for (k in listOf("Copyright", "PresetType", "Name")) {
+            assertTrue("$k should be listed as not-a-look", res.metadata.any { it.key == k })
+        }
+        for (k in listOf("AutoLateralCA", "PerspectiveVertical", "LensProfileEnable")) {
+            assertTrue("$k should be applied now", res.applied.any { it.key == k })
+        }
+        // 18 of the file's keys are look settings, and we handle all 18.
+        assertEquals(18, res.lookKeys.size)
+    }
+
+    /**
+     * Zero is a value. A preset that says `Exposure2012="0"` has told us its
+     * exposure, and the old reader scored that as a failure to import.
+     */
+    @Test
+    fun `a key set to zero is honoured rather than reported as dropped`() {
+        val res = XmpImport.parse(
+            """crs:Exposure2012="0" crs:Contrast2012="0" crs:Clarity2012="0" """,
+        )
+        assertEquals(0, res.ignored.size)
+        for (k in listOf("Exposure2012", "Contrast2012", "Clarity2012")) {
+            val key = res.exact.firstOrNull { it.key == k }
+            assertTrue("$k should be reported as honoured", key != null)
+            assertEquals("$k neutral", "neutral (0)", key!!.mapsTo)
+        }
+        assertEquals(100, res.coveragePercent)
+        // And the recipe is untouched, because zero really is neutral.
+        assertTrue(res.recipe.isIdentity)
+    }
+
+    @Test
+    fun `a preset with nothing unsupported is full coverage`() {
+        val r = XmpImport.parse("""crs:Contrast2012="+10"""")
+        assertEquals(100, r.coveragePercent)
+        assertEquals(100, r.exactPercent)
+    }
+
+    @Test
+    fun `a preset with nothing mappable is zero coverage`() {
+        val r = XmpImport.parse("""crs:Look="Medium High Contrast"""")
+        assertEquals(0, r.coveragePercent)
+        assertTrue(r.isEmpty)
+    }
+
+    @Test
+    fun `an empty file reports zero rather than dividing by nothing`() {
+        val r = XmpImport.parse("<html></html>")
+        assertEquals(0, r.coveragePercent)
+        assertEquals(0, r.exactPercent)
+        assertTrue(r.keys.isEmpty())
+    }
+
+    /**
+     * Every key lands in exactly one of the four tiers. Two parallel lists
+     * could drift; one tagged list cannot, and this is what proves the tagging
+     * is total.
+     */
+    @Test
+    fun `every key is in exactly one tier and the views partition them`() {
+        val res = XmpImport.parse(modern)
+        assertEquals(
+            res.keys.size,
+            res.exact.size + res.approximate.size + res.ignored.size + res.metadata.size,
+        )
+        assertEquals(res.applied.size, res.exact.size + res.approximate.size)
+        assertTrue(res.exact.none { it.reason != null })
+        assertTrue(res.ignored.all { it.mapsTo == null })
+        assertTrue(res.applied.all { it.mapsTo != null && it.mapsTo.isNotBlank() })
+        // lookKeys is applied plus the unsupported ones, and excludes the
+        // not-a-look tier entirely.
+        assertEquals(res.applied.size + res.ignored.size, res.lookKeys.size)
+        assertEquals(res.keys.size - res.metadata.size, res.lookKeys.size)
+    }
+
+    @Test
+    fun `no key appears twice in the report`() {
+        val res = XmpImport.parse(modern)
+        val dupes = res.keys.groupBy { it.key }.filterValues { it.size > 1 }
+        assertTrue("duplicated: " + dupes.keys, dupes.isEmpty())
+    }
+
+    /** The tiers are what the UI marks, so they have to be the real ones. */
+    @Test
+    fun `the tiers separate the exact from the approximate`() {
+        val res = XmpImport.parse(modern)
+        val exact = res.exact.map { it.key }.toSet()
+        val approx = res.approximate.map { it.key }.toSet()
+        // Direct unit matches.
+        assertTrue(exact.contains("Contrast2012"))
+        assertTrue(exact.contains("Tint"))
+        // Remapped or rescaled.
+        assertTrue(approx.contains("Exposure2012"))
+        assertTrue(approx.contains("ColorTemp"))
+        assertTrue(approx.contains("GrainSize"))
+        assertTrue(exact.none { it in approx })
+    }
+}

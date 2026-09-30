@@ -1,4 +1,4 @@
-# Design.md — RetroCam
+# Design.md — Relic
 
 ## 1. Design Language: "Terminal Glass"
 
@@ -32,7 +32,7 @@ A dark, glassmorphic UI (consistent with your Sway aesthetic) where the camera v
 ### 2.1 Camera (Home) Screen
 ```
 ┌─────────────────────────┐
-│  ⚡flash   RETROCAM  ⟲flip│  ← glass status bar (48dp)
+│  ⚡flash   RELIC  ⟲flip│  ← glass status bar (48dp)
 │                         │
 │                         │
 │      VIEWFINDER         │  ← full-bleed, filter live

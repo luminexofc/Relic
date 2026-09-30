@@ -1,4 +1,4 @@
-# Build Report — RetroCam
+# Build Report — Relic
 
 > **Note on §4 and §6.** This was written at the end of one session. The XMP
 > reader has since been fixed and extended: a real Lightroom preset that reported
@@ -8,7 +8,7 @@
 > invisible on a device, and only visible when something checks the number.
 > See `~/.opencode/plan/xmp-full-fidelity.md`.
 
-A record of everything built, decided, broken and fixed while taking RetroCam
+A record of everything built, decided, broken and fixed while taking Relic
 from "41 GPU filters" to a Filter Lab with chained stages, area masks and
 near-complete Adobe XMP preset compatibility.
 
@@ -19,7 +19,7 @@ the parts that went wrong, because those are the parts worth reading twice.
 
 ## 1. Starting point
 
-RetroCam is a retro/procedural camera app for Android. Every filter is a real-time
+Relic is a retro/procedural camera app for Android. Every filter is a real-time
 GPU pass, so the constraint that shapes everything is **frame time**: anything
 added to the shader runs on every pixel of the live viewfinder.
 
@@ -336,7 +336,7 @@ watermark.
 3. **Clarity and Dehaze share a blur radius** where Adobe gives them separate
    ones. Named in the code at both ends so it is not mistaken for Adobe's
    behaviour.
-4. **RetroCam still has no licence.** Only `THIRD_PARTY_NOTICES.md` exists.
+4. **Relic still has no licence.** Only `THIRD_PARTY_NOTICES.md` exists.
 5. **Something on the development phone deletes files from the project folder.**
    24 tracked files — every launcher icon and all the screenshots — were deleted
    mid-session and had to be restored from git; it happened again afterwards.
@@ -351,4 +351,4 @@ watermark.
 |---|---|
 | FilterLibrary | Apache-2.0 |
 | ZXing | Apache-2.0 |
-| **RetroCam itself** | **none — needs one** |
+| **Relic itself** | **none — needs one** |
