@@ -697,7 +697,7 @@ class CameraViewModel @Inject constructor(
         // keep the Lab exactly as it was. Seeding from the transient filter
         // would overwrite labBaseId with "lab_draft" - an id no catalog knows
         // - and the next save dialog would offer LAB_DRAFT as a name.
-        if (s.filter.id == "lab_draft" && !s.labRecipe.isIdentity) {
+        if (s.filter.id == DRAFT_FILTER_ID && !s.labRecipe.isIdentity) {
             _uiState.update {
                 it.copy(mode = MODE_LAB, labTab = 0, labIntensity = s.intensity)
             }
@@ -1224,7 +1224,7 @@ class CameraViewModel @Inject constructor(
         // wants. Reusing one stable id keeps the camera from accumulating a
         // new filter entry per tap.
         val spec = base.copy(
-            id = "lab_draft",
+            id = DRAFT_FILTER_ID,
             displayName = title,
             family = com.retrocam.catalog.FilterFamily.LAB,
             context = "lab draft, over ${base.displayName}",
@@ -1324,8 +1324,24 @@ class CameraViewModel @Inject constructor(
             // the camera preview still showing a look that no longer exists and
             // can no longer be re-selected from the strip. Put the camera back
             // on the plain original filter.
+            //
+            // The live filter holds the deleted look under two different ids:
+            // its own, when handed over from the Presets list, or the transient
+            // draft id, when handed over from Basic/Advanced/Stages. Checking
+            // only the first left the camera stuck on the deleted look - old
+            // name still on the label - whenever the draft path was the one
+            // used. savedRecipeId ties the draft to its preset, so it is the
+            // second half of the check.
             _uiState.update { s ->
-                if (s.filter.id != id) s else s.copy(filter = com.retrocam.catalog.FilterCatalog.default)
+                val liveIsDeleted = s.filter.id == id ||
+                    (s.filter.id == DRAFT_FILTER_ID && s.savedRecipeId == id)
+                if (!liveIsDeleted) s
+                else s.copy(
+                    filter = com.retrocam.catalog.FilterCatalog.default,
+                    intensity = com.retrocam.catalog.FilterCatalog.default.defaultIntensity,
+                    sizeScale = 1f,
+                    detailScale = 1f,
+                )
             }
             Feedback.info(context, "Preset deleted")
         }
@@ -1686,6 +1702,14 @@ class CameraViewModel @Inject constructor(
         const val MODE_PHOTO = "photo"
         const val MODE_VIDEO = "video"
         const val MODE_LAB = "lab"
+
+        /**
+         * The live filter's id when the Lab draft was handed to the camera
+         * directly. Never persisted: the strip is built from stored recipes,
+         * so a direct-use look is usable but not listed. One stable id rather
+         * than one per tap, so the camera cannot accumulate filter entries.
+         */
+        const val DRAFT_FILTER_ID = "lab_draft"
 
         /** Slider range in EV, identical for every camera (see setExposure). */
         const val EXPOSURE_MIN = -6
