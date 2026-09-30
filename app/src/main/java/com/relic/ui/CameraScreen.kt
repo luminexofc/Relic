@@ -37,6 +37,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -71,6 +73,7 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Search
@@ -78,7 +81,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -118,6 +120,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -166,15 +169,21 @@ fun CameraScreen(viewModel: CameraViewModel = hiltViewModel()) {
                 PackageManager.PERMISSION_GRANTED,
         )
     }
+    var deniedOnce by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants ->
         hasPermission = grants[Manifest.permission.CAMERA] == true
         micGranted = grants[Manifest.permission.RECORD_AUDIO] == true
+        // Asked and still refused: the system will now silently ignore
+        // further requests, so the settings shortcut appears. Before the
+        // first ask it would only teach people to skip the direct path.
+        if (!hasPermission) deniedOnce = true
     }
 
     if (!hasPermission) {
         PermissionEmptyState(
+            showSettings = deniedOnce,
             onGrant = {
                 permissionLauncher.launch(
                     arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
@@ -1417,23 +1426,87 @@ private fun FocusReticle(key: Int, locked: Boolean, modifier: Modifier = Modifie
 }
 
 @Composable
-private fun PermissionEmptyState(onGrant: () -> Unit, onOpenSettings: () -> Unit) {
+private fun PermissionEmptyState(
+    showSettings: Boolean,
+    onGrant: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    // An empty viewfinder rather than an error page: the same corner motif
+    // the camera and the Lab draw, with a camera glyph where the picture
+    // would be, so the screen reads as "not started yet" instead of broken.
     Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .statusBarsPadding(),
         contentAlignment = Alignment.Center,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .padding(horizontal = 32.dp),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(4f / 3f)
+                    .clip(RoundedCornerShape(ShadcnRadius.Lg))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, TextDim.copy(alpha = 0.4f), RoundedCornerShape(ShadcnRadius.Lg)),
+                contentAlignment = Alignment.Center,
+            ) {
+                ViewfinderCorners(Modifier.fillMaxSize().padding(10.dp))
+                Icon(
+                    Icons.Filled.PhotoCamera,
+                    contentDescription = null,
+                    tint = TextDim,
+                    modifier = Modifier.size(48.dp),
+                )
+            }
+            Spacer(Modifier.height(18.dp))
             Text(
-                text = "▓▓▓ NO SIGNAL ▓▓▓",
+                text = "CAMERA IS OFF",
                 fontFamily = AppType.Sans,
-                color = MaterialTheme.colorScheme.primary,
+                fontWeight = AppType.Strong,
+                fontSize = 16.sp,
+                color = MaterialTheme.colorScheme.onBackground,
             )
-            Spacer(Modifier.height(12.dp))
-            Text(text = "Camera access needed for the viewfinder.", color = TextDim)
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = onGrant) { Text("Enable camera") }
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onOpenSettings) { Text("Open settings") }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Relic needs camera access for the viewfinder.",
+                fontFamily = AppType.Sans,
+                fontSize = 13.sp,
+                color = TextDim,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = "Microphone is only used for video sound.",
+                fontFamily = AppType.Sans,
+                fontSize = 11.sp,
+                color = TextDim.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(22.dp))
+            ShadcnButton(
+                text = "Enable camera",
+                onClick = onGrant,
+                modifier = Modifier.fillMaxWidth(),
+                size = ButtonSize.Lg,
+            )
+            // Only after a refusal: the system ignores repeat requests once
+            // denied, so before the first ask this would just be a shortcut
+            // past the button that actually works.
+            if (showSettings) {
+                Spacer(Modifier.height(8.dp))
+                ShadcnButton(
+                    text = "Open settings",
+                    onClick = onOpenSettings,
+                    variant = ButtonVariant.Ghost,
+                    modifier = Modifier.fillMaxWidth(),
+                    size = ButtonSize.Default,
+                )
+            }
         }
     }
 }
