@@ -1,66 +1,73 @@
 package com.relic.ui
 
 import android.graphics.Bitmap
-import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.RectF
-import android.graphics.Shader
+import android.graphics.Rect
 import android.graphics.Typeface
-import kotlin.math.max
 
 /**
- * Photo card: the shot baked onto a paper card, written into saved photos.
+ * Photo card: the shot baked onto a white polaroid-style card, written into saved photos.
  *
- * Proportions come from the reference frame in `Media/frame.jpg`: a rounded
- * photo window sitting in the top of the card, a thick blank bar beneath it, and
- * nothing else. The reference also shows a small platform affordance badge
- * overhanging the bottom-right corner, which is deliberately not reproduced -
- * it is UI belonging to whatever is displaying the image, not to the card.
+ * Proportions measured off the reference frame in
+ * `Media/Untitled16_20261002104904.png`: a square photo window with uniform
+ * padding on the sides and top, sharp (unrounded) corners throughout, and a
+ * thick blank bar beneath the photo. The bar carries an outlined square logo
+ * box plus a bold "Relic" wordmark on the left, and the filter name over the
+ * date, right-aligned in light grey, on the right.
  *
- * The bar carries the caption, which is the part the reference leaves blank.
  * Everything is expressed as a fraction of the card width so a card looks the
  * same at any output resolution.
  */
 object PhotoCards {
 
-    private val PAPER = Color.rgb(0xFA, 0xF7, 0xF0)
+    private val PAPER = Color.WHITE
     private const val INK = 0xFF1A1A1A.toInt()
     private val DIM = Color.rgb(0x8A, 0x8A, 0x8A)
 
     // ---- geometry, as fractions of the card width ----
 
-    /** Margin around the photo window: sides and top. */
-    private const val PAD = 0.0439f
+    /** Margin around the photo window: sides and top are equal. */
+    private const val PAD = 0.0565f
 
-    /** Photo window height. */
-    private const val WIN_H = 0.6667f
+    /** Photo window side: square, full width minus the side padding. */
+    private const val WIN = 1f - 2f * PAD
 
     /** Caption bar height. */
-    private const val BAR_H = 0.5263f
-
-    /** Card corner radius. */
-    private const val OUTER_R = 0.1864f
-
-    /** Window corner radii, top then bottom. The reference's are not equal. */
-    private const val WIN_R_TOP = 0.110f
-    private const val WIN_R_BOTTOM = 0.150f
+    private const val BAR_H = 0.2565f
 
     /** Total height is exactly pad + window + bar: the bar runs to the bottom edge. */
-    private val CARD_H: Float get() = PAD + WIN_H + BAR_H
+    private val CARD_H: Float get() = PAD + WIN + BAR_H
 
-    private fun paint(size: Float, color: Int, bold: Boolean = false) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color
-        textAlign = Paint.Align.CENTER
-        typeface = if (bold) Typeface.create(Typeface.MONOSPACE, Typeface.BOLD) else Typeface.MONOSPACE
-        textSize = size
+    // ---- bar content, as fractions of the card width ----
+
+    /** Logo box side and its left margin. */
+    private const val LOGO_SIDE = 0.162f
+    private const val LOGO_LEFT = 0.059f
+
+    /** Gap between the logo box and the wordmark. */
+    private const val WORD_GAP = 0.049f
+
+    /** Right margin for the filter/date lines. */
+    private const val RIGHT_PAD = 0.061f
+
+    private fun paint(size: Float, color: Int, bold: Boolean = false, align: Paint.Align = Paint.Align.LEFT) =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            this.color = color
+            textAlign = align
+            typeface = if (bold) Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD) else Typeface.SANS_SERIF
+            textSize = size
+        }
+
+    /** Draws [text] with its vertical centre at [centerY]. */
+    private fun Canvas.drawCentred(text: String, x: Float, centerY: Float, p: Paint) {
+        val f = p.fontMetrics
+        drawText(text, x, centerY - (f.ascent + f.descent) / 2f, p)
     }
 
     /** The photo window's aspect ratio, for callers that want to match it. */
-    const val WINDOW_ASPECT: Float = (1f - 2f * PAD) / WIN_H
+    const val WINDOW_ASPECT: Float = 1f
 
     fun render(photo: Bitmap, header: String, title: String, details: String? = null): Bitmap {
         val w = photo.width.coerceAtLeast(1)
@@ -69,59 +76,58 @@ object PhotoCards {
         val out = Bitmap.createBitmap(cardW, cardH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
 
-        // Paper card. The area outside the rounded corners stays transparent so
-        // the card can sit on any background.
-        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = PAPER }
-        canvas.drawRoundRect(
-            0f, 0f, cardW.toFloat(), cardH.toFloat(),
-            cardW * OUTER_R, cardW * OUTER_R, cardPaint,
-        )
+        // White card, sharp corners like the reference.
+        canvas.drawColor(PAPER)
 
-        // Photo window, centre cropped and clipped to its rounded shape. A
-        // BitmapShader keeps the crop and the rounded corners in one antialiased
-        // draw; clipping a path and then drawing the bitmap separately gives
-        // jaggy corners on a software canvas.
+        // Photo window, centre cropped. The window is square; crop the long
+        // edge of the source and stretch nothing.
         val winL = cardW * PAD
         val winT = cardW * PAD
-        val winR = cardW - winL
-        val winB = winT + cardW * WIN_H
-        val rTop = cardW * WIN_R_TOP
-        val rBottom = cardW * WIN_R_BOTTOM
-        val path = Path().apply {
-            addRoundRect(
-                RectF(winL, winT, winR, winB),
-                floatArrayOf(rTop, rTop, rTop, rTop, rBottom, rBottom, rBottom, rBottom),
-                Path.Direction.CW,
-            )
-        }
-        val shader = BitmapShader(photo, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-        val scale = max((winR - winL) / photo.width, (winB - winT) / photo.height)
-        val tx = winL + ((winR - winL) - photo.width * scale) / 2f
-        val ty = winT + ((winB - winT) - photo.height * scale) / 2f
-        shader.setLocalMatrix(Matrix().apply { setScale(scale, scale); postTranslate(tx, ty) })
-        canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { this.shader = shader })
+        val winSide = cardW * WIN
+        val srcSide = minOf(photo.width, photo.height)
+        val src = Rect(
+            (photo.width - srcSide) / 2,
+            (photo.height - srcSide) / 2,
+            (photo.width + srcSide) / 2,
+            (photo.height + srcSide) / 2,
+        )
+        canvas.drawBitmap(
+            photo, src,
+            Rect(winL.toInt(), winT.toInt(), (winL + winSide).toInt(), (winT + winSide).toInt()),
+            null,
+        )
 
-        // Caption, in the bar.
-        val barTop = winB
+        // Caption bar.
+        val barTop = winT + winSide
         val barH = cardH - barTop
-        val cx = cardW / 2f
-        if (header.isNotBlank()) {
-            canvas.drawText(
-                header.uppercase().take(28), cx, barTop + barH * 0.28f,
-                paint(barH * 0.10f, DIM),
-            )
+        val barMid = barTop + barH / 2f
+
+        // Logo box: outlined square, vertically centred in the bar.
+        val logoSide = cardW * LOGO_SIDE
+        val logoLeft = cardW * LOGO_LEFT
+        val logoTop = barMid - logoSide / 2f
+        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = INK
+            style = Paint.Style.STROKE
+            strokeWidth = (cardW * 0.005f).coerceAtLeast(1f)
         }
+        canvas.drawRect(logoLeft, logoTop, logoLeft + logoSide, logoTop + logoSide, boxPaint)
+
+        // Wordmark, centred on the logo box.
+        val wordX = logoLeft + logoSide + cardW * WORD_GAP
+        canvas.drawCentred(
+            "Relic", wordX, barMid,
+            paint(logoSide * 0.42f, INK, bold = true),
+        )
+
+        // Filter name over date, right aligned, light grey like the reference.
+        val rightX = cardW - cardW * RIGHT_PAD
+        val small = paint(barH * 0.105f, DIM, align = Paint.Align.RIGHT)
         if (title.isNotBlank()) {
-            canvas.drawText(
-                title.uppercase().take(24), cx, barTop + barH * 0.55f,
-                paint(barH * 0.17f, INK, bold = true),
-            )
+            canvas.drawCentred(title.take(24), rightX, barTop + barH * 0.40f, small)
         }
         if (!details.isNullOrBlank()) {
-            canvas.drawText(
-                details.uppercase().take(40), cx, barTop + barH * 0.78f,
-                paint(barH * 0.105f, DIM),
-            )
+            canvas.drawCentred(details.take(40), rightX, barTop + barH * 0.58f, small)
         }
         return out
     }
