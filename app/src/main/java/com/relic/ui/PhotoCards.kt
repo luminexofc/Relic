@@ -13,9 +13,9 @@ import android.graphics.Typeface
  * Proportions measured off the reference frame in
  * `Media/Untitled16_20261002104904.png`: a square photo window with uniform
  * padding on the sides and top, sharp (unrounded) corners throughout, and a
- * thick blank bar beneath the photo. The bar carries an outlined square logo
- * box plus a bold "Relic" wordmark on the left, and the filter name over the
- * date, right-aligned in light grey, on the right.
+ * thick blank bar beneath the photo. The bar carries the app logo on the left
+ * with a bold "Relic" wordmark beside it, and the filter name over the date,
+ * right-aligned in light grey, on the right.
  *
  * Everything is expressed as a fraction of the card width so a card looks the
  * same at any output resolution.
@@ -69,7 +69,7 @@ object PhotoCards {
     /** The photo window's aspect ratio, for callers that want to match it. */
     const val WINDOW_ASPECT: Float = 1f
 
-    fun render(photo: Bitmap, header: String, title: String, details: String? = null): Bitmap {
+    fun render(photo: Bitmap, header: String, title: String, details: String? = null, logo: Bitmap? = null): Bitmap {
         val w = photo.width.coerceAtLeast(1)
         val cardW = w
         val cardH = (cardW * CARD_H).toInt().coerceAtLeast(1)
@@ -102,16 +102,33 @@ object PhotoCards {
         val barH = cardH - barTop
         val barMid = barTop + barH / 2f
 
-        // Logo box: outlined square, vertically centred in the bar.
+        // App logo, square-cropped into the box and vertically centred in the
+        // bar. A null logo falls back to the old outlined placeholder so a
+        // missing asset degrades to an empty box instead of a crash.
         val logoSide = cardW * LOGO_SIDE
         val logoLeft = cardW * LOGO_LEFT
         val logoTop = barMid - logoSide / 2f
-        val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = INK
-            style = Paint.Style.STROKE
-            strokeWidth = (cardW * 0.005f).coerceAtLeast(1f)
+        if (logo != null) {
+            val side = minOf(logo.width, logo.height).coerceAtLeast(1)
+            canvas.drawBitmap(
+                logo,
+                Rect(
+                    (logo.width - side) / 2,
+                    (logo.height - side) / 2,
+                    (logo.width + side) / 2,
+                    (logo.height + side) / 2,
+                ),
+                Rect(logoLeft.toInt(), logoTop.toInt(), (logoLeft + logoSide).toInt(), (logoTop + logoSide).toInt()),
+                null,
+            )
+        } else {
+            val boxPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = INK
+                style = Paint.Style.STROKE
+                strokeWidth = (cardW * 0.005f).coerceAtLeast(1f)
+            }
+            canvas.drawRect(logoLeft, logoTop, logoLeft + logoSide, logoTop + logoSide, boxPaint)
         }
-        canvas.drawRect(logoLeft, logoTop, logoLeft + logoSide, logoTop + logoSide, boxPaint)
 
         // Wordmark, centred on the logo box.
         val wordX = logoLeft + logoSide + cardW * WORD_GAP

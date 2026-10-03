@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.provider.MediaStore
@@ -1633,6 +1634,13 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    /** The app logo for the photo-card bar, decoded once; null falls back to the outline box. */
+    private val appLogoBitmap: Bitmap? by lazy {
+        runCatching {
+            BitmapFactory.decodeResource(context.resources, com.relic.R.drawable.app_logo)
+        }.getOrNull()
+    }
+
     private fun writeToGallery(bitmap: Bitmap): Uri? {
         val png = _uiState.value.fileFormat == "PNG"
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -1641,7 +1649,7 @@ class CameraViewModel @Inject constructor(
         // Polaroid card baked in when enabled (photos only).
         val card = _uiState.value.photoCard
         val shot = if (card) {
-            PhotoCards.render(bitmap, "RELIC", _uiState.value.filter.displayName, stamp)
+            PhotoCards.render(bitmap, "RELIC", _uiState.value.filter.displayName, stamp, appLogoBitmap)
         } else {
             bitmap
         }
